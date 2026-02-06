@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Task Manager</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="text/babel">
+   import React, { useState, useEffect, useRef } from 'react';
+import { Mic, MicOff, Plus, Filter, Trash2, Check, Calendar, FileText, GripVertical, List, CalendarDays, Settings } from 'lucide-react';
+
+const VoiceTaskManager = () => {
+  const [items, setItems] = useState([]);
+  const [isListening, setIsListening] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editValues, setEditValues] = useState({});
+  const [expandedNotes, setExpandedNotes] = useState({});
+  const [learningData, setLearningData] = useState([]);
+  const [draggedItem, setDraggedItem] = useState(null);
+  const [view, setView] = useState('list');
+  const [customCategories, setCustomCategories] = useState([]);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const recognitionRef = useRef(null);
+
+  const defaultCategories = ['work', 'personal', 'project'];
+
+  // Load items, learning data, and custom categories on mount
+  useEffect(() => {
+    loadItems();
+    loadLearningData();
+    loadCustomCategories();
+  }, []);
+
+  const loadItems = async () => {
+    try {
+      const result = await window.storage.get('task-items');
+      if (result && result.value) {
+        setItems(JSON.parse(result.value));
+      }
+    } catch (err) {
+      console.log('No existing items found');
+    }
+  };
+
+  const loadLearningData = async () => {
+    try {
+      const result = await window.storage.get('tag-learning');
+      if (result && result.value) {
+        setLearningData(JSON.parse(result.value));
+      }
+    } catch (err) {
+      console.log('No learning data found');
+    }
+  };
+
+  const loadCustomCategories = async () => {
+    try {
+      const result = await window.storage.get('custom-categories');
+      if (result && result.value) {
+        setCustomCategories(JSON.parse(result.value));
+      }
+    } catch (err) {
+      console.log('No custom categories found');
+    }
+  };
+
+  const saveItems = async (newItems) => {
+    try {
+      await window.storage.set('task-items', JSON.stringify(newItems));
+    } catch (err) {
+      setError('Failed to save items');
+    }
+  };
+
+  const saveLearningData = async (data) => {
+    try {
+      await window.storage.set('tag-learning', JSON.stringify(data));
+    } catch (err) {
+      console.log('Failed to save learning data');
+    }
+  };
+
+  const saveCustomCategories = async (categories) => {
+    try {
+      await window.storage.set('custom-categories', JSON.stringify(categories));
+    } catch (err) {
+      console.log('Failed to save custom categories');
+    }
+  };
+
+  const addCustomCategory = () => {
+    if (!newCategory.trim()) return;
+    const categoryName = newCategory.toLowerCase().trim();
+    
+    if (allCategories.includes(categoryName)) {
+      setError('Category already exists');
+      return;
+    }
+
+    const updated = [...customCategories, categoryName];
+    setCustomCategories(updated);
+    saveCustomCategories(updated);
+    setNewCategory('');
+  };
+
+  const deleteCustomCategory = (category) => {
+    const updated = customCategories.filter(c => c !== category);
+    setCustomCategories(updated);
+    saveCustomCategories(updated);
+  };
+
+  const allCategories = [...defaultCategories, ...customCategories];
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+
+      recognitionRef.current.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setTextInput(transcript);
+        setIsListening(false);
+        setError('');
+      };
+
+      recognitionRef.current.onerror = (event) => {
+        setIsListening(false);
+        if (event.error === 'not-allowed') {
+          setError('Microphone blocked in artifact. Use text input instead.');
+        } else if (event.error === 'no-speech') {
+          setError('No speech detected. Try again.');
+        } else {
+          setError(`Voice unavailable in sandbox. Use text input.`);
+        }
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+  }, []);
+
+  const toggleListening = async () => {
+    if (!recognitionRef.current) {
+      setError('Voice not supported in artifact sandbox. Use text input.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        setError('');
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch (err) {
+        setError('Voice unavailable in artifact. Use text input instead.');
+      }
+    }
+  };
+
+  const categorizeWithClaude = async (text) => {
+    setLoading(true);
+    try {
+      const learningContext = learningData.length > 0 
+        ? `\n\nLearn from these past corrections:\n${learningData.slice(-10).map(l => 
+            `"${l.text}" → type: ${l.type}, category: ${l.category}, priority: ${l.priority}`
+          ).join('\n')}`
+        : '';
+
+      const categoriesList = allCategories.join(', ');
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2000,
+          messages: [
+            {
+              role: 'user',
+              content: `You are a task parser. The user may provide one or multiple tasks/ideas in a single input. Parse and return ONLY a JSON array with no markdown, backticks, or preamble.
+
+Input: "${text}"
+${learningContext}
+
+Available categories: ${categoriesList}
+
+For EACH separate task or idea, create an object with:
+{
+  "text": "the individual task/idea text",
+  "type": "task" or "idea",
+  "category": one of [${categoriesList}],
+  "priority": "high" or "medium" or "low",
+  "dueDate": "YYYY-MM-DD" or null
+}
+
+Rules:
+- Separate multiple items if the input contains "and", commas, semicolons, or line breaks suggesting multiple tasks
+- Extract due dates from phrases like "by Friday", "tomorrow", "next week", "end of month"
+- Today is ${new Date().toISOString().split('T')[0]}
+- type: "task" if actionable, "idea" if conceptual
+- category: choose the most appropriate from available categories
+- priority: high if urgent/time-sensitive, medium if standard, low if someday/maybe
+- Apply learning patterns from past corrections
+
+Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "..."}]`
+            }
+          ]
+        })
+      });
+
+      const data = await response.json();
+      const content = data.content[0].text.trim();
+      const cleaned = content.replace(/```json|```/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error('Categorization error:', err);
+      return [{
+        text: text,
+        type: 'task',
+        category: 'personal',
+        priority: 'medium',
+        dueDate: null
+      }];
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addItem = async () => {
+    if (!textInput.trim()) return;
+
+    const parsedItems = await categorizeWithClaude(textInput);
+    
+    const newItems = parsedItems.map(item => ({
+      id: Date.now() + Math.random(),
+      text: item.text,
+      completed: false,
+      createdAt: new Date().toISOString(),
+      type: item.type,
+      category: item.category,
+      priority: item.priority,
+      dueDate: item.dueDate,
+      notes: ''
+    }));
+
+    const updatedItems = [...items, ...newItems];
+    setItems(updatedItems);
+    saveItems(updatedItems);
+    setTextInput('');
+  };
+
+  const toggleComplete = (id, e) => {
+    e.stopPropagation();
+    const updatedItems = items.map(item =>
+      item.id === id ? { ...item, completed: !item.completed } : item
+    );
+    setItems(updatedItems);
+    saveItems(updatedItems);
+  };
+
+  const deleteItem = (id, e) => {
+    e.stopPropagation();
+    const updatedItems = items.filter(item => item.id !== id);
+    setItems(updatedItems);
+    saveItems(updatedItems);
+  };
+
+  const startEditing = (item) => {
+    setEditingId(item.id);
+    setEditValues({
+      text: item.text,
+      type: item.type,
+      category: item.category,
+      priority: item.priority,
+      dueDate: item.dueDate || '',
+      notes: item.notes || ''
+    });
+  };
+
+  const saveEdit = (item) => {
+    const updatedItems = items.map(i =>
+      i.id === item.id ? { ...i, ...editValues } : i
+    );
+    setItems(updatedItems);
+    saveItems(updatedItems);
+
+    // Save to learning data
+    const learning = {
+      text: editValues.text,
+      type: editValues.type,
+      category: editValues.category,
+      priority: editValues.priority,
+      timestamp: new Date().toISOString()
+    };
+    const newLearningData = [...learningData, learning];
+    setLearningData(newLearningData);
+    saveLearningData(newLearningData);
+
+    setEditingId(null);
+  };
+
+  const toggleNotes = (id, e) => {
+    e.stopPropagation();
+    setExpandedNotes(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  const handleDragStart = (e, item) => {
+    setDraggedItem(item);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, targetItem) => {
+    e.preventDefault();
+    if (!draggedItem || draggedItem.id === targetItem.id) return;
+
+    const draggedIdx = filteredItems.findIndex(i => i.id === draggedItem.id);
+    const targetIdx = filteredItems.findIndex(i => i.id === targetItem.id);
+    
+    if (draggedIdx === targetIdx) return;
+
+    const newFilteredItems = [...filteredItems];
+    newFilteredItems.splice(draggedIdx, 1);
+    newFilteredItems.splice(targetIdx, 0, draggedItem);
+
+    const reorderedIds = newFilteredItems.map(i => i.id);
+    const newItems = items.map(item => {
+      const newIndex = reorderedIds.indexOf(item.id);
+      if (newIndex !== -1) {
+        return { ...item, order: newIndex };
+      }
+      return item;
+    }).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    setItems(newItems);
+  };
+
+  const handleDragEnd = () => {
+    if (draggedItem) {
+      saveItems(items);
+    }
+    setDraggedItem(null);
+  };
+
+  const sortedItems = [...items].sort((a, b) => {
+    if (!a.dueDate && !b.dueDate) return new Date(b.createdAt) - new Date(a.createdAt);
+    if (!a.dueDate) return 1;
+    if (!b.dueDate) return -1;
+    return new Date(a.dueDate) - new Date(b.dueDate);
+  });
+
+  const filteredItems = sortedItems.filter(item => {
+    if (filter !== 'all' && item.type !== filter) return false;
+    if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
+    return true;
+  });
+
+  const stats = {
+    total: items.length,
+    tasks: items.filter(i => i.type === 'task').length,
+    ideas: items.filter(i => i.type === 'idea').length,
+    completed: items.filter(i => i.completed).length
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return null;
+    const date = new Date(dateString);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    if (date.toDateString() === today.toDateString()) return 'Today';
+    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+    
+    const diff = Math.ceil((date - today) / (1000 * 60 * 60 * 24));
+    if (diff < 0) return 'Overdue';
+    if (diff < 7) return `${diff}d`;
+    
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Calendar view helpers
+  const getCalendarDays = () => {
+    const today = new Date();
+    const days = [];
+    
+    for (let i = -3; i < 14; i++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() + i);
+      days.push(date);
+    }
+    
+    return days;
+  };
+
+  const getItemsForDate = (date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    return filteredItems.filter(item => item.dueDate === dateStr);
+  };
+
+  const isToday = (date) => {
+    const today = new Date();
+    return date.toDateString() === today.toDateString();
+  };
+
+  const getCategoryColor = (category) => {
+    const colors = {
+      work: 'bg-purple-100 text-purple-700',
+      personal: 'bg-green-100 text-green-700',
+      project: 'bg-orange-100 text-orange-700'
+    };
+    
+    // Custom categories get random colors
+    if (!colors[category]) {
+      const customColors = [
+        'bg-pink-100 text-pink-700',
+        'bg-blue-100 text-blue-700',
+        'bg-yellow-100 text-yellow-700',
+        'bg-indigo-100 text-indigo-700',
+        'bg-teal-100 text-teal-700'
+      ];
+      const index = customCategories.indexOf(category);
+      return customColors[index % customColors.length];
+    }
+    
+    return colors[category];
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">Smart Task Manager</h1>
+              <div className="flex gap-4 text-sm text-gray-600">
+                <span>📋 {stats.tasks} tasks</span>
+                <span>💡 {stats.ideas} ideas</span>
+                <span>✅ {stats.completed} completed</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowCategoryManager(!showCategoryManager)}
+              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg"
+            >
+              <Settings size={24} />
+            </button>
+          </div>
+
+          {/* View Toggle */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setView('list')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                view === 'list' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <List size={18} />
+              List
+            </button>
+            <button
+              onClick={() => setView('calendar')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                view === 'calendar' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <CalendarDays size={18} />
+              Calendar
+            </button>
+          </div>
+        </div>
+
+        {/* Category Manager */}
+        {showCategoryManager && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h3 className="font-bold text-gray-800 mb-4">Manage Categories</h3>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Default Categories</label>
+              <div className="flex flex-wrap gap-2">
+                {defaultCategories.map(cat => (
+                  <span key={cat} className={`px-3 py-1 rounded-full text-sm font-medium ${getCategoryColor(cat)}`}>
+                    {cat}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Custom Categories</label>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && addCustomCategory()}
+                  placeholder="New category name..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  onClick={addCustomCategory}
+                  className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 font-medium"
+                >
+                  Add
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {customCategories.map(cat => (
+                  <span key={cat} className={`px-3 py-1 rounded-full text-sm font-medium ${getCategoryColor(cat)} flex items-center gap-2`}>
+                    {cat}
+                    <button
+                      onClick={() => deleteCustomCategory(cat)}
+                      className="hover:text-red-600"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Input Section */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={toggleListening}
+              className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors ${
+                isListening
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'bg-indigo-500 hover:bg-indigo-600 text-white'
+              }`}
+            >
+              {isListening ? <MicOff size={20} /> : <Mic size={20} />}
+              {isListening ? 'Stop' : 'Voice'}
+            </button>
+
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addItem()}
+              placeholder="Add task(s) - separate multiple with 'and' or commas..."
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+
+            <button
+              onClick={addItem}
+              disabled={loading || !textInput.trim()}
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus size={20} />
+              Add
+            </button>
+          </div>
+          {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+          {loading && <p className="text-indigo-600 text-sm mt-2">Parsing and categorizing...</p>}
+          <p className="text-gray-500 text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and update CV for YAZIO role"</p>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Filter size={18} className="text-gray-600" />
+            <span className="font-medium text-gray-700">Filters</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setFilter('all')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                filter === 'all' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setFilter('task')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                filter === 'task' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Tasks
+            </button>
+            <button
+              onClick={() => setFilter('idea')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                filter === 'idea' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Ideas
+            </button>
+            
+            <div className="w-px bg-gray-300 mx-2"></div>
+            
+            <button
+              onClick={() => setCategoryFilter('all')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                categoryFilter === 'all' ? 'bg-purple-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              All Categories
+            </button>
+            {allCategories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                  categoryFilter === cat ? 'bg-purple-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Calendar View */}
+        {view === 'calendar' && (
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <div className="space-y-3">
+              {getCalendarDays().map(date => {
+                const dayItems = getItemsForDate(date);
+                const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                
+                return (
+                  <div key={date.toISOString()} className={`border rounded-lg p-4 ${isToday(date) ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className={`font-semibold ${isToday(date) ? 'text-indigo-700' : 'text-gray-800'}`}>
+                        {dateStr} {isToday(date) && '(Today)'}
+                      </h3>
+                      <span className="text-sm text-gray-500">{dayItems.length} items</span>
+                    </div>
+                    
+                    {dayItems.length === 0 ? (
+                      <p className="text-gray-400 text-sm">No tasks scheduled</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {dayItems.map(item => (
+                          <div key={item.id} className="bg-white border border-gray-200 rounded p-3">
+                            <div className="flex items-start gap-2">
+                              <button
+                                onClick={(e) => toggleComplete(item.id, e)}
+                                className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                                  item.completed
+                                    ? 'bg-green-500 border-green-500'
+                                    : 'border-gray-300 hover:border-green-500'
+                                }`}
+                              >
+                                {item.completed && <Check size={12} className="text-white" />}
+                              </button>
+                              <div className="flex-1">
+                                <p className={`text-sm ${item.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                                  {item.text}
+                                </p>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    item.type === 'task' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
+                                  }`}>
+                                    {item.type}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(item.category)}`}>
+                                    {item.category}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    item.priority === 'high' ? 'bg-red-100 text-red-700' :
+                                    item.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
+                                    'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {item.priority}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* List View */}
+        {view === 'list' && (
+          <div className="space-y-3">
+            {filteredItems.length === 0 ? (
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+                No items found. Add your first task or idea!
+              </div>
+            ) : (
+              filteredItems.map(item => (
+                <div
+                  key={item.id}
+                  draggable={editingId !== item.id}
+                  onDragStart={(e) => handleDragStart(e, item)}
+                  onDragOver={(e) => handleDragOver(e, item)}
+                  onDragEnd={handleDragEnd}
+                  className={`bg-white rounded-lg shadow-md transition-all hover:shadow-lg ${
+                    item.completed ? 'opacity-60' : ''
+                  } ${draggedItem?.id === item.id ? 'opacity-50' : ''}`}
+                >
+                  <div 
+                    className="p-4 cursor-pointer"
+                    onClick={() => editingId === item.id ? null : startEditing(item)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div 
+                        className="mt-1 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600"
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        <GripVertical size={20} />
+                      </div>
+                      
+                      <button
+                        onClick={(e) => toggleComplete(item.id, e)}
+                        className={`mt-1 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                          item.completed
+                            ? 'bg-green-500 border-green-500'
+                            : 'border-gray-300 hover:border-green-500'
+                        }`}
+                      >
+                        {item.completed && <Check size={16} className="text-white" />}
+                      </button>
+
+                      <div className="flex-1 min-w-0">
+                        {editingId === item.id ? (
+                          <div className="space-y-3">
+                            <input
+                              type="text"
+                              value={editValues.text}
+                              onChange={(e) => setEditValues({...editValues, text: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              placeholder="Task title..."
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            
+                            <div className="flex flex-wrap gap-2">
+                              <select
+                                value={editValues.type}
+                                onChange={(e) => setEditValues({...editValues, type: e.target.value})}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="task">Task</option>
+                                <option value="idea">Idea</option>
+                              </select>
+                              
+                              <select
+                                value={editValues.category}
+                                onChange={(e) => setEditValues({...editValues, category: e.target.value})}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {allCategories.map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                              
+                              <select
+                                value={editValues.priority}
+                                onChange={(e) => setEditValues({...editValues, priority: e.target.value})}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                              </select>
+                              
+                              <input
+                                type="date"
+                                value={editValues.dueDate}
+                                onChange={(e) => setEditValues({...editValues, dueDate: e.target.value})}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                            
+                            <textarea
+                              value={editValues.notes}
+                              onChange={(e) => setEditValues({...editValues, notes: e.target.value})}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              placeholder="Add notes..."
+                              rows="3"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  saveEdit(item);
+                                }}
+                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 font-medium"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingId(null);
+                                }}
+                                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-400 font-medium"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p className={`text-gray-800 mb-2 ${item.completed ? 'line-through' : ''}`}>
+                              {item.text}
+                            </p>
+                            
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                item.type === 'task' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {item.type === 'task' ? '📋 Task' : '💡 Idea'}
+                              </span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCategoryColor(item.category)}`}>
+                                {item.category}
+                              </span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                item.priority === 'high' ? 'bg-red-100 text-red-700' :
+                                item.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
+                                'bg-gray-100 text-gray-700'
+                              }`}>
+                                {item.priority}
+                              </span>
+                              {item.dueDate && (
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${
+                                  formatDate(item.dueDate) === 'Overdue' ? 'bg-red-100 text-red-700' :
+                                  formatDate(item.dueDate) === 'Today' ? 'bg-orange-100 text-orange-700' :
+                                  'bg-blue-100 text-blue-700'
+                                }`}>
+                                  <Calendar size={12} />
+                                  {formatDate(item.dueDate)}
+                                </span>
+                              )}
+                              {item.notes && (
+                                <button
+                                  onClick={(e) => toggleNotes(item.id, e)}
+                                  className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center gap-1"
+                                >
+                                  <FileText size={12} />
+                                  note
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={(e) => deleteItem(item.id, e)}
+                        className="flex-shrink-0 p-2 text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {expandedNotes[item.id] && item.notes && (
+                    <div className="px-4 pb-4 pt-0">
+                      <div className="pl-9 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                        {item.notes}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+    // At the very end, add this instead:
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<VoiceTaskManager />);
+  </script>
+</body>
+</html>
