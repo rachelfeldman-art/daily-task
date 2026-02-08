@@ -32,23 +32,8 @@ const CalendarDays = (p) => React.createElement(Icon, p, React.createElement('re
 const Settings = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z' }), React.createElement('circle', { cx: 12, cy: 12, r: 3 }));
 const X = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M18 6 6 18' }), React.createElement('path', { d: 'm6 6 12 12' }));
 
-// Mock window.storage for non-artifact environment
-if (!window.storage) {
-  window.storage = {
-    async get(key) {
-      const value = localStorage.getItem(key);
-      return value ? { key, value } : null;
-    },
-    async set(key, value) {
-      localStorage.setItem(key, value);
-      return { key, value };
-    },
-    async delete(key) {
-      localStorage.removeItem(key);
-      return { key, deleted: true };
-    }
-  };
-}
+// API base URL - same origin when served by Express
+const API_BASE = '';
 
 const VoiceTaskManager = () => {
   const [items, setItems] = useState([]);
@@ -80,80 +65,68 @@ const VoiceTaskManager = () => {
 
   const loadItems = async () => {
     try {
-      const result = await window.storage.get('task-items');
-      if (result && result.value) {
-        setItems(JSON.parse(result.value));
+      const res = await fetch(`${API_BASE}/api/items`);
+      if (res.ok) {
+        setItems(await res.json());
       }
     } catch (err) {
-      console.log('No existing items found');
+      console.log('Failed to load items:', err);
     }
   };
 
   const loadLearningData = async () => {
     try {
-      const result = await window.storage.get('tag-learning');
-      if (result && result.value) {
-        setLearningData(JSON.parse(result.value));
+      const res = await fetch(`${API_BASE}/api/learning-data`);
+      if (res.ok) {
+        setLearningData(await res.json());
       }
     } catch (err) {
-      console.log('No learning data found');
+      console.log('Failed to load learning data:', err);
     }
   };
 
   const loadCustomCategories = async () => {
     try {
-      const result = await window.storage.get('custom-categories');
-      if (result && result.value) {
-        setCustomCategories(JSON.parse(result.value));
+      const res = await fetch(`${API_BASE}/api/custom-categories`);
+      if (res.ok) {
+        setCustomCategories(await res.json());
       }
     } catch (err) {
-      console.log('No custom categories found');
+      console.log('Failed to load custom categories:', err);
     }
   };
 
-  const saveItems = async (newItems) => {
-    try {
-      await window.storage.set('task-items', JSON.stringify(newItems));
-    } catch (err) {
-      setError('Failed to save items');
-    }
-  };
-
-  const saveLearningData = async (data) => {
-    try {
-      await window.storage.set('tag-learning', JSON.stringify(data));
-    } catch (err) {
-      console.log('Failed to save learning data');
-    }
-  };
-
-  const saveCustomCategories = async (categories) => {
-    try {
-      await window.storage.set('custom-categories', JSON.stringify(categories));
-    } catch (err) {
-      console.log('Failed to save custom categories');
-    }
-  };
-
-  const addCustomCategory = () => {
+  const addCustomCategory = async () => {
     if (!newCategory.trim()) return;
     const categoryName = newCategory.toLowerCase().trim();
-    
+
     if (allCategories.includes(categoryName)) {
       setError('Category already exists');
       return;
     }
 
-    const updated = [...customCategories, categoryName];
-    setCustomCategories(updated);
-    saveCustomCategories(updated);
-    setNewCategory('');
+    try {
+      await fetch(`${API_BASE}/api/custom-categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: categoryName })
+      });
+      setCustomCategories([...customCategories, categoryName]);
+      setNewCategory('');
+    } catch (err) {
+      setError('Failed to add category');
+    }
   };
 
-  const deleteCustomCategory = (category) => {
-    const updated = customCategories.filter(c => c !== category);
-    setCustomCategories(updated);
-    saveCustomCategories(updated);
+  const deleteCustomCategory = async (category) => {
+    try {
+      await fetch(`${API_BASE}/api/custom-categories/${encodeURIComponent(category)}`, {
+        method: 'DELETE'
+      });
+      setCustomCategories(customCategories.filter(c => c !== category));
+    } catch (err) {
+      console.log('Failed to delete category:', err);
+    }
   };
 
   const allCategories = [...defaultCategories, ...customCategories];
@@ -292,9 +265,9 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     if (!textInput.trim()) return;
 
     const parsedItems = await categorizeWithClaude(textInput);
-    
+
     const newItems = parsedItems.map(item => ({
-      id: Date.now() + Math.random(),
+      id: Math.floor(Date.now() + Math.random() * 1000),
       text: item.text,
       completed: false,
       createdAt: new Date().toISOString(),
@@ -305,26 +278,44 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
       notes: ''
     }));
 
-    const updatedItems = [...items, ...newItems];
-    setItems(updatedItems);
-    saveItems(updatedItems);
-    setTextInput('');
+    try {
+      await fetch(`${API_BASE}/api/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newItems)
+      });
+      setItems([...items, ...newItems]);
+      setTextInput('');
+    } catch (err) {
+      setError('Failed to save items');
+    }
   };
 
-  const toggleComplete = (id, e) => {
+  const toggleComplete = async (id, e) => {
     e.stopPropagation();
-    const updatedItems = items.map(item =>
-      item.id === id ? { ...item, completed: !item.completed } : item
-    );
-    setItems(updatedItems);
-    saveItems(updatedItems);
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+    const updated = { ...item, completed: !item.completed };
+    try {
+      await fetch(`${API_BASE}/api/items/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      setItems(items.map(i => i.id === id ? updated : i));
+    } catch (err) {
+      setError('Failed to update item');
+    }
   };
 
-  const deleteItem = (id, e) => {
+  const deleteItem = async (id, e) => {
     e.stopPropagation();
-    const updatedItems = items.filter(item => item.id !== id);
-    setItems(updatedItems);
-    saveItems(updatedItems);
+    try {
+      await fetch(`${API_BASE}/api/items/${id}`, { method: 'DELETE' });
+      setItems(items.filter(item => item.id !== id));
+    } catch (err) {
+      setError('Failed to delete item');
+    }
   };
 
   const startEditing = (item) => {
@@ -339,24 +330,36 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     });
   };
 
-  const saveEdit = (item) => {
-    const updatedItems = items.map(i =>
-      i.id === item.id ? { ...i, ...editValues } : i
-    );
-    setItems(updatedItems);
-    saveItems(updatedItems);
+  const saveEdit = async (item) => {
+    const updated = { ...item, ...editValues };
+    try {
+      await fetch(`${API_BASE}/api/items/${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      setItems(items.map(i => i.id === item.id ? updated : i));
+    } catch (err) {
+      setError('Failed to save edit');
+    }
 
     // Save to learning data
     const learning = {
       text: editValues.text,
       type: editValues.type,
       category: editValues.category,
-      priority: editValues.priority,
-      timestamp: new Date().toISOString()
+      priority: editValues.priority
     };
-    const newLearningData = [...learningData, learning];
-    setLearningData(newLearningData);
-    saveLearningData(newLearningData);
+    try {
+      await fetch(`${API_BASE}/api/learning-data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(learning)
+      });
+      setLearningData([...learningData, { ...learning, timestamp: new Date().toISOString() }]);
+    } catch (err) {
+      console.log('Failed to save learning data:', err);
+    }
 
     setEditingId(null);
   };
@@ -380,7 +383,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
 
     const draggedIdx = filteredItems.findIndex(i => i.id === draggedItem.id);
     const targetIdx = filteredItems.findIndex(i => i.id === targetItem.id);
-    
+
     if (draggedIdx === targetIdx) return;
 
     const newFilteredItems = [...filteredItems];
@@ -397,7 +400,11 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     }).sort((a, b) => (a.order || 0) - (b.order || 0));
 
     setItems(newItems);
-    saveItems(newItems);
+    fetch(`${API_BASE}/api/items`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newItems)
+    }).catch(err => console.log('Failed to save reorder:', err));
   };
 
   const handleDragEnd = () => {
