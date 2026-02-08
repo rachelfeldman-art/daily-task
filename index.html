@@ -187,10 +187,6 @@ const VoiceTaskManager = () => {
   const categorizeWithClaude = async (text) => {
     setLoading(true);
     try {
-      if (!window.ANTHROPIC_API_KEY) {
-        setLoading(false);
-        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
-      }
       const learningContext = learningData.length > 0 
         ? `\n\nLearn from these past corrections:\n${learningData.slice(-10).map(l => 
             `"${l.text}" → type: ${l.type}, category: ${l.category}, priority: ${l.priority}`
@@ -199,20 +195,13 @@ const VoiceTaskManager = () => {
 
       const categoriesList = allCategories.join(', ');
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': window.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          messages: [
-            {
-              role: 'user',
-              content: `You are a task parser. The user may provide one or multiple tasks/ideas in a single input. Parse and return ONLY a JSON array with no markdown, backticks, or preamble.
+      const body = {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [
+          {
+            role: 'user',
+            content: `You are a task parser. The user may provide one or multiple tasks/ideas in a single input. Parse and return ONLY a JSON array with no markdown, backticks, or preamble.
 
 Input: "${text}"
 ${learningContext}
@@ -238,12 +227,28 @@ Rules:
 - Apply learning patterns from past corrections
 
 Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "..."}]`
-            }
-          ]
-        })
+          }
+        ]
+      };
+
+      const response = await fetch('/api/categorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
 
+      if (!response.ok) {
+        if (response.status === 503) {
+          return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
+        }
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Categorization failed');
+      }
+
       const data = await response.json();
+      if (!data.content || !data.content[0]) {
+        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
+      }
       const content = data.content[0].text.trim();
       const cleaned = content.replace(/```json|```/g, '').trim();
       return JSON.parse(cleaned);

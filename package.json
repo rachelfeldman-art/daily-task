@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "repository": {
     "type": "git",
@@ -15,8 +17,14 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
     "cors": "^2.8.6",
+    "dotenv": "^17.2.4",
+    "drizzle-orm": "^0.45.1",
     "express": "^5.2.1",
     "pg": "^8.18.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8"
   }
 }
