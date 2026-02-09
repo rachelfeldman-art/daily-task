@@ -53,6 +53,7 @@ const VoiceTaskManager = () => {
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [showCompleted, setShowCompleted] = useState(false);
+  const [calendarDragOverDate, setCalendarDragOverDate] = useState(null);
   const recognitionRef = useRef(null);
 
   const defaultCategories = ['work', 'personal', 'project'];
@@ -460,6 +461,48 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
 
   const handleDragEnd = () => {
     setDraggedItem(null);
+    setCalendarDragOverDate(null);
+  };
+
+  const handleCalendarDragOver = (e, date) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const dateStr = date.toISOString().split('T')[0];
+    if (calendarDragOverDate !== dateStr) {
+      setCalendarDragOverDate(dateStr);
+    }
+  };
+
+  const handleCalendarDragLeave = (e, date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    if (calendarDragOverDate === dateStr) {
+      setCalendarDragOverDate(null);
+    }
+  };
+
+  const handleCalendarDrop = async (e, date) => {
+    e.preventDefault();
+    setCalendarDragOverDate(null);
+    if (!draggedItem) return;
+
+    const newDueDate = date.toISOString().split('T')[0];
+    if (draggedItem.dueDate === newDueDate) {
+      setDraggedItem(null);
+      return;
+    }
+
+    const updated = { ...draggedItem, dueDate: newDueDate };
+    try {
+      await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+    } catch (err) {
+      setError('Failed to update due date');
+    }
+    setDraggedItem(null);
   };
 
   const sortedItems = [...items].sort((a, b) => {
@@ -744,22 +787,44 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
               {getCalendarDays().map(date => {
                 const dayItems = getItemsForDate(date);
                 const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                
+                const isoDate = date.toISOString().split('T')[0];
+                const isDragOver = calendarDragOverDate === isoDate;
+
                 return (
-                  <div key={date.toISOString()} className={`border rounded-lg p-4 ${isToday(date) ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200'}`}>
+                  <div
+                    key={date.toISOString()}
+                    onDragOver={(e) => handleCalendarDragOver(e, date)}
+                    onDragLeave={(e) => handleCalendarDragLeave(e, date)}
+                    onDrop={(e) => handleCalendarDrop(e, date)}
+                    className={`border-2 rounded-lg p-4 transition-colors ${
+                      isDragOver
+                        ? 'border-indigo-400 bg-indigo-100 ring-2 ring-indigo-300'
+                        : isToday(date)
+                          ? 'border-indigo-500 bg-indigo-50'
+                          : 'border-gray-200'
+                    }`}
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <h3 className={`font-semibold ${isToday(date) ? 'text-indigo-700' : 'text-gray-800'}`}>
                         {dateStr} {isToday(date) && '(Today)'}
                       </h3>
                       <span className="text-sm text-gray-500">{dayItems.length} items</span>
                     </div>
-                    
+
                     {dayItems.length === 0 ? (
-                      <p className="text-gray-400 text-sm">No tasks scheduled</p>
+                      <p className="text-gray-400 text-sm">{isDragOver ? 'Drop here to reschedule' : 'No tasks scheduled'}</p>
                     ) : (
                       <div className="space-y-2">
                         {dayItems.map(item => (
-                          <div key={item.id} className="bg-white border border-gray-200 rounded p-3">
+                          <div
+                            key={item.id}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, item)}
+                            onDragEnd={handleDragEnd}
+                            className={`bg-white border border-gray-200 rounded p-3 cursor-grab active:cursor-grabbing ${
+                              draggedItem?.id === item.id ? 'opacity-40' : ''
+                            }`}
+                          >
                             <div className="flex items-start gap-2">
                               <button
                                 onClick={(e) => toggleComplete(item.id, e)}
