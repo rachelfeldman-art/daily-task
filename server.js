@@ -11,9 +11,13 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
 // PostgreSQL connection
+if (!process.env.DATABASE_URL) {
+  console.error('DATABASE_URL environment variable is required');
+  process.exit(1);
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL ||
-    'postgresql://neondb_owner:npg_b2LDVsyTN9Jf@ep-silent-star-a99uwhih-pooler.gwc.azure.neon.tech/neondb?sslmode=require',
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
