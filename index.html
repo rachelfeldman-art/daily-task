@@ -52,6 +52,7 @@ const VoiceTaskManager = () => {
   const [customCategories, setCustomCategories] = useState([]);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategory, setNewCategory] = useState('');
+  const [showCompleted, setShowCompleted] = useState(false);
   const recognitionRef = useRef(null);
 
   const defaultCategories = ['work', 'personal', 'project'];
@@ -153,6 +154,12 @@ const VoiceTaskManager = () => {
         } else if (event.error === 'no-speech') {
           setError('No speech detected. Try again.');
         } else {
+          console.log('SpeechRecognition onerror:', {
+            error: event.error,
+            message: event.message,
+            type: typeof event.error,
+            eventKeys: Object.keys(event)
+          });
           setError(`Voice unavailable in sandbox. Use text input.`);
         }
       };
@@ -173,12 +180,14 @@ const VoiceTaskManager = () => {
       recognitionRef.current.stop();
       setIsListening(false);
     } else {
+      console.log('Voice: requesting mic and starting recognition...');
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         setError('');
         recognitionRef.current.start();
         setIsListening(true);
       } catch (err) {
+        console.log('getUserMedia / start error:', err?.name, err?.message, err);
         setError('Voice unavailable in artifact. Use text input instead.');
       }
     }
@@ -213,10 +222,6 @@ const VoiceTaskManager = () => {
   const categorizeWithClaude = async (text) => {
     setLoading(true);
     try {
-      if (!window.ANTHROPIC_API_KEY) {
-        setLoading(false);
-        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }].map(applyDefaultDueDate);
-      }
       const learningContext = learningData.length > 0 
         ? `\n\nLearn from these past corrections:\n${learningData.slice(-10).map(l => 
             `"${l.text}" → type: ${l.type}, category: ${l.category}, priority: ${l.priority}`
@@ -225,20 +230,13 @@ const VoiceTaskManager = () => {
 
       const categoriesList = allCategories.join(', ');
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': window.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          messages: [
-            {
-              role: 'user',
-              content: `You are a task parser. The user may provide one or multiple tasks/ideas in a single input. Parse and return ONLY a JSON array with no markdown, backticks, or preamble.
+      const body = {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
+        messages: [
+          {
+            role: 'user',
+            content: `You are a task parser. The user may provide one or multiple tasks/ideas in a single input. Parse and return ONLY a JSON array with no markdown, backticks, or preamble.
 
 Input: "${text}"
 ${learningContext}
@@ -263,16 +261,36 @@ Rules:
 - category: choose the most appropriate from available categories
 - priority: high if urgent/time-sensitive, medium if standard, low if someday/maybe
 - Apply learning patterns from past corrections
-- Fix any spelling and grammar mistakes in the task title text
-- If the input contains parenthetical info that is NOT a date or priority, remove it from "text" and place it in "notes"
+- If a duedate is not specified: 
+  - if the type is work, set the duedate to the current date.
+  - for any other task, set the duedate to end of week
+  - if it is an idea, set the duedate to end of month
+- Adjust spelling and grammar as needed for task titles. 
+  - If info is given in parenthesis and not a date or priority, include it in the task notes. 
 
-Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "...", "notes": "..."}]`
-            }
-          ]
-        })
+Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "..."}]`
+          }
+        ]
+      };
+
+      const response = await fetch('/api/categorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       });
 
+      if (!response.ok) {
+        if (response.status === 503) {
+          return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
+        }
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Categorization failed');
+      }
+
       const data = await response.json();
+      if (!data.content || !data.content[0]) {
+        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
+      }
       const content = data.content[0].text.trim();
       const cleaned = content.replace(/```json|```/g, '').trim();
       return JSON.parse(cleaned).map(applyDefaultDueDate);
@@ -454,6 +472,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
   const filteredItems = sortedItems.filter(item => {
     if (filter !== 'all' && item.type !== filter) return false;
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
+    if (!showCompleted && item.completed) return false;
     return true;
   });
 
@@ -659,7 +678,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           </div>
           {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
           {loading && <p className="text-indigo-600 text-sm mt-2">Parsing and categorizing...</p>}
-          <p className="text-gray-500 text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and update CV for YAZIO role"</p>
+          <p className="text-gray-500 text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and give Dahlia treats"</p>
         </div>
 
         {/* Filters */}
@@ -977,6 +996,20 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                 </div>
               ))
             )}
+          </div>
+        )}
+
+        {/* Toggle to show/hide completed items */}
+        {items.some(i => i.completed) && (
+          <div className="mt-6 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowCompleted(!showCompleted)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+            >
+              {showCompleted ? 'Hide completed' : 'Show completed'}
+              <span className="text-gray-500">({items.filter(i => i.completed).length})</span>
+            </button>
           </div>
         )}
       </div>
