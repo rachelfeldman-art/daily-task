@@ -52,6 +52,7 @@ const VoiceTaskManager = () => {
   const [customCategories, setCustomCategories] = useState([]);
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategory, setNewCategory] = useState('');
+  const [showCompleted, setShowCompleted] = useState(false);
   const recognitionRef = useRef(null);
 
   const defaultCategories = ['work', 'personal', 'project'];
@@ -153,6 +154,12 @@ const VoiceTaskManager = () => {
         } else if (event.error === 'no-speech') {
           setError('No speech detected. Try again.');
         } else {
+          console.log('SpeechRecognition onerror:', {
+            error: event.error,
+            message: event.message,
+            type: typeof event.error,
+            eventKeys: Object.keys(event)
+          });
           setError(`Voice unavailable in sandbox. Use text input.`);
         }
       };
@@ -173,12 +180,14 @@ const VoiceTaskManager = () => {
       recognitionRef.current.stop();
       setIsListening(false);
     } else {
+      console.log('Voice: requesting mic and starting recognition...');
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         setError('');
         recognitionRef.current.start();
         setIsListening(true);
       } catch (err) {
+        console.log('getUserMedia / start error:', err?.name, err?.message, err);
         setError('Voice unavailable in artifact. Use text input instead.');
       }
     }
@@ -426,6 +435,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
   const filteredItems = sortedItems.filter(item => {
     if (filter !== 'all' && item.type !== filter) return false;
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
+    if (!showCompleted && item.completed) return false;
     return true;
   });
 
@@ -631,7 +641,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           </div>
           {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
           {loading && <p className="text-indigo-600 text-sm mt-2">Parsing and categorizing...</p>}
-          <p className="text-gray-500 text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and update CV for YAZIO role"</p>
+          <p className="text-gray-500 text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and give Dahlia treats"</p>
         </div>
 
         {/* Filters */}
@@ -949,6 +959,20 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                 </div>
               ))
             )}
+          </div>
+        )}
+
+        {/* Toggle to show/hide completed items */}
+        {items.some(i => i.completed) && (
+          <div className="mt-6 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowCompleted(!showCompleted)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+            >
+              {showCompleted ? 'Hide completed' : 'Show completed'}
+              <span className="text-gray-500">({items.filter(i => i.completed).length})</span>
+            </button>
           </div>
         )}
       </div>
