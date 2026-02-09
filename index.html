@@ -234,6 +234,12 @@ Rules:
 - category: choose the most appropriate from available categories
 - priority: high if urgent/time-sensitive, medium if standard, low if someday/maybe
 - Apply learning patterns from past corrections
+- If a duedate is not specified: 
+  - if the type is work, set the duedate to the current date.
+  - for any other task, set the duedate to end of week
+  - if it is an idea, set the duedate to end of month
+- Adjust spelling and grammar as needed for task titles. 
+  - If info is given in parenthesis and not a date or priority, include it in the task notes. 
 
 Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "..."}]`
           }
