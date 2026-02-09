@@ -184,12 +184,38 @@ const VoiceTaskManager = () => {
     }
   };
 
+  const getEndOfWeek = () => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? 0 : 7 - day; // Sunday = end of week
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().split('T')[0];
+  };
+
+  const getEndOfMonth = () => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1, 0); // last day of current month
+    return d.toISOString().split('T')[0];
+  };
+
+  const applyDefaultDueDate = (item) => {
+    if (item.dueDate) return item;
+    const today = new Date().toISOString().split('T')[0];
+    if (item.type === 'idea') {
+      return { ...item, dueDate: getEndOfMonth() };
+    }
+    if (item.category === 'work') {
+      return { ...item, dueDate: today };
+    }
+    return { ...item, dueDate: getEndOfWeek() };
+  };
+
   const categorizeWithClaude = async (text) => {
     setLoading(true);
     try {
       if (!window.ANTHROPIC_API_KEY) {
         setLoading(false);
-        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
+        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }].map(applyDefaultDueDate);
       }
       const learningContext = learningData.length > 0 
         ? `\n\nLearn from these past corrections:\n${learningData.slice(-10).map(l => 
@@ -221,11 +247,12 @@ Available categories: ${categoriesList}
 
 For EACH separate task or idea, create an object with:
 {
-  "text": "the individual task/idea text",
+  "text": "the individual task/idea text (clean, corrected title)",
   "type": "task" or "idea",
   "category": one of [${categoriesList}],
   "priority": "high" or "medium" or "low",
-  "dueDate": "YYYY-MM-DD" or null
+  "dueDate": "YYYY-MM-DD" or null,
+  "notes": "additional context or details, or empty string"
 }
 
 Rules:
@@ -236,8 +263,10 @@ Rules:
 - category: choose the most appropriate from available categories
 - priority: high if urgent/time-sensitive, medium if standard, low if someday/maybe
 - Apply learning patterns from past corrections
+- Fix any spelling and grammar mistakes in the task title text
+- If the input contains parenthetical info that is NOT a date or priority, remove it from "text" and place it in "notes"
 
-Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "..."}]`
+Return format: [{"text": "...", "type": "...", "category": "...", "priority": "...", "dueDate": "...", "notes": "..."}]`
             }
           ]
         })
@@ -246,7 +275,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
       const data = await response.json();
       const content = data.content[0].text.trim();
       const cleaned = content.replace(/```json|```/g, '').trim();
-      return JSON.parse(cleaned);
+      return JSON.parse(cleaned).map(applyDefaultDueDate);
     } catch (err) {
       console.error('Categorization error:', err);
       return [{
@@ -255,7 +284,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
         category: 'personal',
         priority: 'medium',
         dueDate: null
-      }];
+      }].map(applyDefaultDueDate);
     } finally {
       setLoading(false);
     }
@@ -275,7 +304,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
       category: item.category,
       priority: item.priority,
       dueDate: item.dueDate,
-      notes: ''
+      notes: item.notes || ''
     }));
 
     try {
@@ -332,6 +361,10 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
 
   const saveEdit = async (item) => {
     const updated = { ...item, ...editValues };
+    // If category changed to 'work' and no due date set, default to today
+    if (updated.category === 'work' && !updated.dueDate) {
+      updated.dueDate = new Date().toISOString().split('T')[0];
+    }
     try {
       await fetch(`${API_BASE}/api/items/${item.id}`, {
         method: 'PUT',
