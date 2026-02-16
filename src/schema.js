@@ -21,6 +21,7 @@ const items = pgTable('items', {
   due_date: date('due_date'),
   notes: text('notes').default(''),
   sort_order: integer('sort_order').default(0),
+  user_id: text('user_id'),
 });
 
 const learningData = pgTable('learning_data', {
@@ -30,11 +31,13 @@ const learningData = pgTable('learning_data', {
   category: varchar('category', { length: 100 }).notNull(),
   priority: varchar('priority', { length: 10 }).notNull(),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  user_id: text('user_id'),
 });
 
 const customCategories = pgTable('custom_categories', {
   id: serial('id').primaryKey(),
-  name: varchar('name', { length: 100 }).notNull().unique(),
+  name: varchar('name', { length: 100 }).notNull(),
+  user_id: text('user_id'),
 });
 
 module.exports = { items, learningData, customCategories };
