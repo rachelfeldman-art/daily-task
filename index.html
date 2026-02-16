@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Task Manager</title>
+  <title>Daily Task</title>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -15,6 +15,63 @@
     src="https://communal-hyena-62.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
     type="text/javascript">
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cedarville+Cursive&family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-canvas: #F5F0E8;
+      --bg-card: #FFFBF7;
+      --text-primary: #2D2A26;
+      --text-secondary: #6B6560;
+      --accent-terracotta: #C65D3B;
+      --accent-golden-moss: #C2A83E;
+      --accent-muted-berry: #9E5B8C;
+      --accent-fern: #4F7C59;
+      --accent-lake: #3F6C7A;
+      --accent-storm: #4B4F73;
+      --accent-slate: #5E6B73;
+      --tint-cloud-sand: #E6D8C3;
+    }
+    body {
+      font-family: 'Source Sans 3', sans-serif;
+      background: var(--bg-canvas);
+      color: var(--text-primary);
+    }
+    @keyframes confetti-fly {
+      0% { transform: translate(0, 0) scale(1); opacity: 1; }
+      100% { transform: translate(var(--cf-dx), var(--cf-dy)) scale(0); opacity: 0; }
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(158, 91, 140, 0.5); }
+      50% { box-shadow: 0 0 0 12px rgba(158, 91, 140, 0); }
+    }
+    @keyframes checkbox-pop {
+      0% { transform: scale(0.8); }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+    .input-focus-glow:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(63,108,122,0.4);
+    }
+    .mic-pulse-anim {
+      animation: mic-pulse 1.5s ease-in-out infinite;
+    }
+    .checkbox-pop-anim {
+      animation: checkbox-pop 0.3s ease-out;
+    }
+    .priority-dot-pulse {
+      animation: priority-dot-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes priority-dot-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.15); }
+    }
+    .header-title {
+      font-family: 'Cedarville Cursive', cursive;
+    }
+  </style>
 </head>
 <body>
   <div id="root"></div>
@@ -60,7 +117,7 @@ const VoiceTaskManager = () => {
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [showCompleted, setShowCompleted] = useState(false);
-  const [calendarDragOverDate, setCalendarDragOverDate] = useState(null);
+  const [justCompletedId, setJustCompletedId] = useState(null);
   const recognitionRef = useRef(null);
 
   const defaultCategories = ['work', 'personal', 'project'];
@@ -346,11 +403,39 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     }
   };
 
+  const CONFETTI_COLORS = ['#C65D3B', '#C2A83E', '#4F7C59', '#9E5B8C', '#3F6C7A', '#E6D8C3'];
+  const fireConfetti = (sourceEl) => {
+    if (!sourceEl || !sourceEl.getBoundingClientRect) return;
+    const rect = sourceEl.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:9999';
+    document.body.appendChild(container);
+    const count = 30;
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement('div');
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+      const dist = 60 + Math.random() * 80;
+      const dx = Math.cos(angle) * dist;
+      const dy = -Math.abs(Math.sin(angle)) * dist - 20;
+      el.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:8px;height:8px;border-radius:2px;background:${CONFETTI_COLORS[i % CONFETTI_COLORS.length]};--cf-dx:${dx}px;--cf-dy:${dy}px;animation:confetti-fly 0.8s ease-out forwards`;
+      container.appendChild(el);
+    }
+    setTimeout(() => container.remove(), 800);
+  };
+
   const toggleComplete = async (id, e) => {
     e.stopPropagation();
     const item = items.find(i => i.id === id);
     if (!item) return;
     const updated = { ...item, completed: !item.completed };
+    const isCompleting = updated.completed;
+    if (isCompleting) {
+      fireConfetti(e.currentTarget);
+      setJustCompletedId(id);
+      setTimeout(() => setJustCompletedId(null), 400);
+    }
     try {
       await fetch(`${API_BASE}/api/items/${id}`, {
         method: 'PUT',
@@ -574,76 +659,114 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     return date.toDateString() === today.toDateString();
   };
 
-  const getCategoryColor = (category) => {
-    const colors = {
-      work: 'bg-purple-100 text-purple-700',
-      personal: 'bg-green-100 text-green-700',
-      project: 'bg-orange-100 text-orange-700'
-    };
-    
-    // Custom categories get random colors
-    if (!colors[category]) {
-      const customColors = [
-        'bg-pink-100 text-pink-700',
-        'bg-blue-100 text-blue-700',
-        'bg-yellow-100 text-yellow-700',
-        'bg-indigo-100 text-indigo-700',
-        'bg-teal-100 text-teal-700'
-      ];
-      const index = customCategories.indexOf(category);
-      return customColors[index % customColors.length];
+  // Earthy palette (light background): bg tint, left border, badge tint, text, emoji
+  const hexToRgba = (hex, alpha) => {
+    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  };
+  const getCategoryStyle = (category) => {
+    const work = { hex: '#4B4F73', emoji: '💼' };      // Storm Indigo
+    const personal = { hex: '#4F7C59', emoji: '🏠' }; // Fern Green
+    const project = { hex: '#C65D3B', emoji: '🚀' };  // Terracotta
+    const customCycle = [
+      { hex: '#9E5B8C', emoji: '📌' },  // Muted Berry
+      { hex: '#3F6C7A', emoji: '📌' },  // Lake Blue
+      { hex: '#C2A83E', emoji: '📌' },  // Golden Moss
+      { hex: '#5E6B73', emoji: '📌' }   // River Slate
+    ];
+    const map = { work, personal, project };
+    let data = map[category];
+    if (!data) {
+      const i = customCategories.indexOf(category);
+      data = customCycle[i >= 0 ? i % customCycle.length : 0];
     }
-    
-    return colors[category];
+    const hex = data.hex;
+    return {
+      bg: hexToRgba(hex, 0.18),
+      border: hex,
+      text: hex,
+      badgeBg: hexToRgba(hex, 0.22),
+      badgeText: hex,
+      emoji: data.emoji
+    };
+  };
+  const getPriorityStyle = (priority) => {
+    const high = { bg: '#C65D3B', text: '#C65D3B' };   // Terracotta
+    const medium = { bg: '#3F6C7A', text: '#3F6C7A' };  // Lake Blue
+    const low = { bg: '#5E6B73', text: '#5E6B73' };     // River Slate
+    const map = { high, medium, low };
+    const d = map[priority] || low;
+    return { badgeBg: hexToRgba(d.bg, 0.22), badgeText: d.text };
+  };
+
+  // Conditional card background: pale green (new), pale red (overdue), pale yellow (today), else cream
+  const NEW_TASK_MINUTES = 5;
+  const getCardBackground = (item) => {
+    if (item.completed) return 'rgba(79,124,89,0.06)'; // subtle fern
+    const now = Date.now();
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (item.dueDate && item.dueDate < todayStr) return 'rgba(198,93,59,0.08)';   // pale terracotta (overdue)
+    if (item.dueDate && item.dueDate === todayStr) return 'rgba(194,168,62,0.08)'; // pale golden moss (today)
+    if (item.createdAt) {
+      const created = new Date(item.createdAt).getTime();
+      if (now - created < NEW_TASK_MINUTES * 60 * 1000) return 'rgba(79,124,89,0.08)'; // pale fern (new)
+    }
+    return '#FFFBF7'; // cream
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">Smart Task Manager</h1>
-              <div className="flex gap-4 text-sm text-gray-600">
-                <span>📋 {stats.tasks} tasks</span>
-                <span>💡 {stats.ideas} ideas</span>
-                <span>✅ {stats.completed} completed</span>
-              </div>
-            </div>
+    <div className="min-h-screen p-4">
+      <div className="max-w-4xl mx-auto">
+        {/* Sticky header bar — light frosted glass */}
+        <header className="sticky top-0 z-20 -mx-4 px-4 pt-4 pb-3 mb-4 rounded-2xl backdrop-blur-md bg-[#FFFBF7]/85 border border-[#E6D8C3]/60 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="header-title text-2xl font-normal text-[#2D2A26] flex items-center gap-2">
+              <span>🌿</span> My Tasks
+            </h1>
             <div className="flex items-center gap-2">
+              {/* Pill view toggle */}
+              <div className="flex rounded-full p-1 bg-[#E6D8C3]/50 border border-[#E6D8C3]">
+                <button
+                  onClick={() => setView('list')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    view === 'list' ? 'bg-white text-[#3F6C7A] shadow-sm' : 'text-[#6B6560] hover:text-[#2D2A26]'
+                  }`}
+                >
+                  <List size={16} />
+                  List
+                </button>
+                <button
+                  onClick={() => setView('calendar')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    view === 'calendar' ? 'bg-white text-[#3F6C7A] shadow-sm' : 'text-[#6B6560] hover:text-[#2D2A26]'
+                  }`}
+                >
+                  <CalendarDays size={16} />
+                  Calendar
+                </button>
+              </div>
               <button
                 onClick={() => setShowCategoryManager(!showCategoryManager)}
-                className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg"
+                className="p-2 text-[#6B6560] hover:text-[#2D2A26] hover:bg-[#E6D8C3]/40 rounded-xl transition-colors"
               >
-                <Settings size={24} />
+                <Settings size={22} />
               </button>
               <div id="clerk-user-button"></div>
             </div>
           </div>
-
-          {/* View Toggle */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setView('list')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                view === 'list' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              <List size={18} />
-              List
-            </button>
-            <button
-              onClick={() => setView('calendar')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                view === 'calendar' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              <CalendarDays size={18} />
-              Calendar
-            </button>
+          {/* Earthy stat pills */}
+          <div className="flex flex-wrap gap-2 mt-3">
+            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' }}>
+              📋 {stats.tasks} tasks
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' }}>
+              💡 {stats.ideas} ideas
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(79,124,89,0.22)', color: '#4F7C59' }}>
+              ✅ {stats.completed} done
+            </span>
           </div>
-        </div>
+        </header>
 
         {/* Category Manager */}
         {showCategoryManager && (
@@ -653,11 +776,14 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">Default Categories</label>
               <div className="flex flex-wrap gap-2">
-                {defaultCategories.map(cat => (
-                  <span key={cat} className={`px-3 py-1 rounded-full text-sm font-medium ${getCategoryColor(cat)}`}>
-                    {cat}
-                  </span>
-                ))}
+                {defaultCategories.map(cat => {
+                  const s = getCategoryStyle(cat);
+                  return (
+                    <span key={cat} className="px-3 py-1 rounded-full text-sm font-medium" style={{ backgroundColor: s.badgeBg, color: s.badgeText }}>
+                      {s.emoji} {cat}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
@@ -680,31 +806,34 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                 </button>
               </div>
               <div className="flex flex-wrap gap-2">
-                {customCategories.map(cat => (
-                  <span key={cat} className={`px-3 py-1 rounded-full text-sm font-medium ${getCategoryColor(cat)} flex items-center gap-2`}>
-                    {cat}
-                    <button
-                      onClick={() => deleteCustomCategory(cat)}
-                      className="hover:text-red-600"
-                    >
-                      <X size={14} />
-                    </button>
-                  </span>
-                ))}
+                {customCategories.map(cat => {
+                  const s = getCategoryStyle(cat);
+                  return (
+                    <span key={cat} className="px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2" style={{ backgroundColor: s.badgeBg, color: s.badgeText }}>
+                      {s.emoji} {cat}
+                      <button
+                        onClick={() => deleteCustomCategory(cat)}
+                        className="hover:opacity-80"
+                      >
+                        <X size={14} />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
             </div>
           </div>
         )}
 
-        {/* Input Section */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+        {/* Hero input — warm white surface, Lake Blue focus glow */}
+        <div className="bg-[#FFFBF7] rounded-2xl border border-[#E6D8C3]/80 p-5 mb-6 shadow-sm">
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={toggleListening}
-              className={`flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors ${
+              className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all flex-shrink-0 ${
                 isListening
-                  ? 'bg-red-500 hover:bg-red-600 text-white'
-                  : 'bg-indigo-500 hover:bg-indigo-600 text-white'
+                  ? 'bg-[#9E5B8C] text-white hover:bg-[#8a4d7a] mic-pulse-anim'
+                  : 'bg-[#3F6C7A] text-white hover:bg-[#355d6a]'
               }`}
             >
               {isListening ? <MicOff size={20} /> : <Mic size={20} />}
@@ -717,77 +846,74 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
               onChange={(e) => setTextInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && addItem()}
               placeholder="Add task(s) - separate multiple with 'and' or commas..."
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="input-focus-glow flex-1 px-4 py-3 bg-white border border-[#E6D8C3] rounded-xl text-[#2D2A26] placeholder:text-[#6B6560] transition-shadow"
             />
 
             <button
               onClick={addItem}
               disabled={loading || !textInput.trim()}
-              className="flex items-center justify-center gap-2 px-6 py-3 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-[#4F7C59] to-[#3d6b47] text-white rounded-xl font-medium transition-all hover:opacity-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm flex-shrink-0"
             >
               <Plus size={20} />
               Add
             </button>
           </div>
-          {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-          {loading && <p className="text-indigo-600 text-sm mt-2">Parsing and categorizing...</p>}
-          <p className="text-gray-500 text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and give Dahlia treats"</p>
+          {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
+          {loading && <p className="text-[#3F6C7A] text-sm mt-2">Parsing and categorizing...</p>}
+          <p className="text-[#6B6560] text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and give Dahlia treats"</p>
         </div>
 
-        {/* Filters */}
-        <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <Filter size={18} className="text-gray-600" />
-            <span className="font-medium text-gray-700">Filters</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                filter === 'all' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => setFilter('task')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                filter === 'task' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              Tasks
-            </button>
-            <button
-              onClick={() => setFilter('idea')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                filter === 'idea' ? 'bg-indigo-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              Ideas
-            </button>
-            
-            <div className="w-px bg-gray-300 mx-2"></div>
-            
-            <button
-              onClick={() => setCategoryFilter('all')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                categoryFilter === 'all' ? 'bg-purple-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              All Categories
-            </button>
-            {allCategories.map(cat => (
+        {/* Filters — inline earthy pills, no card wrapper */}
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+              filter === 'all' ? 'bg-[#5E6B73] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+            }`}
+          >
+            All
+          </button>
+          <button
+            onClick={() => setFilter('task')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+              filter === 'task' ? 'bg-[#3F6C7A] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+            }`}
+          >
+            📋 Tasks
+          </button>
+          <button
+            onClick={() => setFilter('idea')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+              filter === 'idea' ? 'bg-[#C2A83E] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+            }`}
+          >
+            💡 Ideas
+          </button>
+
+          <span className="w-px h-6 bg-[#E6D8C3] mx-1" aria-hidden />
+
+          <button
+            onClick={() => setCategoryFilter('all')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+              categoryFilter === 'all' ? 'bg-[#4A4642] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+            }`}
+          >
+            All Categories
+          </button>
+          {allCategories.map(cat => {
+            const s = getCategoryStyle(cat);
+            const active = categoryFilter === cat;
+            return (
               <button
                 key={cat}
                 onClick={() => setCategoryFilter(cat)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  categoryFilter === cat ? 'bg-purple-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
+                className="px-4 py-2 rounded-full text-sm font-medium transition-all border border-transparent hover:opacity-90"
+                style={active ? { backgroundColor: s.border, color: 'white' } : { backgroundColor: s.badgeBg, color: s.badgeText, borderColor: 'transparent' }}
               >
-                {cat}
+                {s.emoji} {cat}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
         {/* Calendar View */}
@@ -852,18 +978,14 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                                 </p>
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    item.type === 'task' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
+                                    item.type === 'task' ? 'bg-[#3F6C7A]/20 text-[#3F6C7A]' : 'bg-[#C2A83E]/20 text-[#C2A83E]'
                                   }`}>
                                     {item.type}
                                   </span>
-                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getCategoryColor(item.category)}`}>
-                                    {item.category}
+                                  <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: getCategoryStyle(item.category).badgeBg, color: getCategoryStyle(item.category).badgeText }}>
+                                    {getCategoryStyle(item.category).emoji} {item.category}
                                   </span>
-                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                    item.priority === 'high' ? 'bg-red-100 text-red-700' :
-                                    item.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
-                                    'bg-gray-100 text-gray-700'
-                                  }`}>
+                                  <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={(() => { const p = getPriorityStyle(item.priority); return { backgroundColor: p.badgeBg, color: p.badgeText }; })()}>
                                     {item.priority}
                                   </span>
                                 </div>
@@ -880,24 +1002,34 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           </div>
         )}
 
-        {/* List View */}
+        {/* List View — color-block task cards */}
         {view === 'list' && (
           <div className="space-y-3">
             {filteredItems.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              <div className="bg-[#FFFBF7] rounded-2xl border border-[#E6D8C3]/80 p-8 text-center text-[#6B6560]">
                 No items found. Add your first task or idea!
               </div>
             ) : (
-              filteredItems.map(item => (
+              filteredItems.map(item => {
+                const catStyle = getCategoryStyle(item.category);
+                const isDragging = draggedItem?.id === item.id;
+                return (
                 <div
                   key={item.id}
                   draggable={editingId !== item.id}
                   onDragStart={(e) => handleDragStart(e, item)}
                   onDragOver={(e) => handleDragOver(e, item)}
                   onDragEnd={handleDragEnd}
-                  className={`bg-white rounded-lg shadow-md transition-all hover:shadow-lg ${
+                  className={`rounded-2xl border-l-4 transition-all duration-200 ${
                     item.completed ? 'opacity-60' : ''
-                  } ${draggedItem?.id === item.id ? 'opacity-50' : ''}`}
+                  } ${isDragging ? 'opacity-50 scale-95 rotate-1' : 'hover:scale-[1.02]'}`}
+                  style={{
+                    backgroundColor: getCardBackground(item),
+                    borderLeftColor: catStyle.border,
+                    boxShadow: isDragging ? 'none' : undefined
+                  }}
+                  onMouseEnter={(e) => { if (!item.completed && !isDragging) e.currentTarget.style.boxShadow = `0 4px 20px ${catStyle.border}30`; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.boxShadow = ''; }}
                 >
                   <div 
                     className="p-4 cursor-pointer"
@@ -905,7 +1037,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                   >
                     <div className="flex items-start gap-3">
                       <div 
-                        className="mt-1 cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600"
+                        className="mt-1 cursor-grab active:cursor-grabbing text-[#6B6560] hover:text-[#2D2A26]"
                         onMouseDown={(e) => e.stopPropagation()}
                       >
                         <GripVertical size={20} />
@@ -913,13 +1045,13 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                       
                       <button
                         onClick={(e) => toggleComplete(item.id, e)}
-                        className={`mt-1 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        className={`mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${justCompletedId === item.id ? 'checkbox-pop-anim' : ''} ${
                           item.completed
-                            ? 'bg-green-500 border-green-500'
-                            : 'border-gray-300 hover:border-green-500'
+                            ? 'bg-[#4F7C59] border-[#4F7C59]'
+                            : 'border-[#E6D8C3] hover:border-[#4F7C59]'
                         }`}
                       >
-                        {item.completed && <Check size={16} className="text-white" />}
+                        {item.completed && <Check size={14} className="text-white" />}
                       </button>
 
                       <div className="flex-1 min-w-0">
@@ -929,78 +1061,66 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                               type="text"
                               value={editValues.text}
                               onChange={(e) => setEditValues({...editValues, text: e.target.value})}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              className="w-full px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-[#2D2A26] placeholder:text-[#6B6560] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
                               placeholder="Task title..."
                               onClick={(e) => e.stopPropagation()}
                             />
-                            
                             <div className="flex flex-wrap gap-2">
                               <select
                                 value={editValues.type}
                                 onChange={(e) => setEditValues({...editValues, type: e.target.value})}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-sm text-[#2D2A26] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <option value="task">Task</option>
                                 <option value="idea">Idea</option>
                               </select>
-                              
                               <select
                                 value={editValues.category}
                                 onChange={(e) => setEditValues({...editValues, category: e.target.value})}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-sm text-[#2D2A26] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 {allCategories.map(cat => (
                                   <option key={cat} value={cat}>{cat}</option>
                                 ))}
                               </select>
-                              
                               <select
                                 value={editValues.priority}
                                 onChange={(e) => setEditValues({...editValues, priority: e.target.value})}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-sm text-[#2D2A26] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <option value="high">High</option>
                                 <option value="medium">Medium</option>
                                 <option value="low">Low</option>
                               </select>
-                              
                               <input
                                 type="date"
                                 value={editValues.dueDate}
                                 onChange={(e) => setEditValues({...editValues, dueDate: e.target.value})}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                className="px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-sm text-[#2D2A26] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
                                 onClick={(e) => e.stopPropagation()}
                               />
                             </div>
-                            
                             <textarea
                               value={editValues.notes}
                               onChange={(e) => setEditValues({...editValues, notes: e.target.value})}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              className="w-full px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-sm text-[#2D2A26] placeholder:text-[#6B6560] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
                               placeholder="Add notes..."
                               rows="3"
                               onClick={(e) => e.stopPropagation()}
                             />
-                            
                             <div className="flex gap-2">
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  saveEdit(item);
-                                }}
-                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 font-medium"
+                                onClick={(e) => { e.stopPropagation(); saveEdit(item); }}
+                                className="px-4 py-2 bg-[#4F7C59] text-white rounded-xl text-sm hover:opacity-95 font-medium"
                               >
                                 Save
                               </button>
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingId(null);
-                                }}
-                                className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-400 font-medium"
+                                onClick={(e) => { e.stopPropagation(); setEditingId(null); }}
+                                className="px-4 py-2 bg-[#E6D8C3]/60 text-[#2D2A26] rounded-xl text-sm hover:bg-[#E6D8C3] font-medium"
                               >
                                 Cancel
                               </button>
@@ -1008,32 +1128,29 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                           </div>
                         ) : (
                           <>
-                            <p className={`text-gray-800 mb-2 ${item.completed ? 'line-through' : ''}`}>
-                              {item.text}
+                            <p className={`text-lg font-semibold text-[#2D2A26] mb-2 ${item.completed ? 'line-through opacity-80' : ''}`}>
+                              {catStyle.emoji} {item.text}
                             </p>
-                            
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                item.type === 'task' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'
-                              }`}>
-                                {item.type === 'task' ? '📋 Task' : '💡 Idea'}
+                              <span className="flex items-center gap-1.5">
+                                <span
+                                  className={`w-2 h-2 rounded-full flex-shrink-0 ${item.priority === 'high' ? 'priority-dot-pulse' : ''}`}
+                                  style={{ backgroundColor: item.priority === 'high' ? '#C65D3B' : item.priority === 'medium' ? '#3F6C7A' : '#5E6B73' }}
+                                />
+                                <span className="text-xs font-bold uppercase text-[#6B6560]">{item.priority}</span>
                               </span>
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCategoryColor(item.category)}`}>
-                                {item.category}
-                              </span>
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                item.priority === 'high' ? 'bg-red-100 text-red-700' :
-                                item.priority === 'medium' ? 'bg-orange-100 text-orange-700' :
-                                'bg-gray-100 text-gray-700'
-                              }`}>
-                                {item.priority}
+                              <span className="text-[#E6D8C3]">|</span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${item.type === 'task' ? 'bg-[#3F6C7A]/20 text-[#3F6C7A]' : 'bg-[#C2A83E]/20 text-[#C2A83E]'}`}>
+                                {item.type === 'task' ? 'Task' : 'Idea'}
                               </span>
                               {item.dueDate && (
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${
-                                  formatDate(item.dueDate) === 'Overdue' ? 'bg-red-100 text-red-700' :
-                                  formatDate(item.dueDate) === 'Today' ? 'bg-orange-100 text-orange-700' :
-                                  'bg-blue-100 text-blue-700'
-                                }`}>
+                                <span className="px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1" style={(() => {
+                                  const d = formatDate(item.dueDate);
+                                  const terracotta = { backgroundColor: 'rgba(198,93,59,0.22)', color: '#C65D3B' };
+                                  const goldenMoss = { backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' };
+                                  const lakeBlue = { backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' };
+                                  return d === 'Overdue' ? terracotta : d === 'Today' ? goldenMoss : lakeBlue;
+                                })()}>
                                   <Calendar size={12} />
                                   {formatDate(item.dueDate)}
                                 </span>
@@ -1041,7 +1158,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                               {item.notes && (
                                 <button
                                   onClick={(e) => toggleNotes(item.id, e)}
-                                  className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 flex items-center gap-1"
+                                  className="px-2 py-1 rounded-full text-xs font-medium bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3]/70 flex items-center gap-1"
                                 >
                                   <FileText size={12} />
                                   note
@@ -1051,25 +1168,23 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                           </>
                         )}
                       </div>
-
                       <button
                         onClick={(e) => deleteItem(item.id, e)}
-                        className="flex-shrink-0 p-2 text-gray-400 hover:text-red-500 transition-colors"
+                        className="flex-shrink-0 p-2 text-[#6B6560] hover:text-[#C65D3B] transition-colors"
                       >
                         <Trash2 size={18} />
                       </button>
                     </div>
                   </div>
-                  
                   {expandedNotes[item.id] && item.notes && (
                     <div className="px-4 pb-4 pt-0">
-                      <div className="pl-9 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                      <div className="pl-9 text-sm text-[#6B6560] bg-[#FFFBF7] border border-[#E6D8C3] p-3 rounded-xl">
                         {item.notes}
                       </div>
                     </div>
                   )}
                 </div>
-              ))
+              ); })
             )}
           </div>
         )}
