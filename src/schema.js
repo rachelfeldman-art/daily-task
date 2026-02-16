@@ -37,6 +37,7 @@ const learningData = pgTable('learning_data', {
 const customCategories = pgTable('custom_categories', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 100 }).notNull(),
+  emoji: varchar('emoji', { length: 20 }).default('📌'),
   user_id: text('user_id'),
 });
 

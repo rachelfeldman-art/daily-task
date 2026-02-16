@@ -63,6 +63,7 @@ async function initDB() {
       ALTER TABLE items ADD COLUMN IF NOT EXISTS user_id TEXT;
       ALTER TABLE learning_data ADD COLUMN IF NOT EXISTS user_id TEXT;
       ALTER TABLE custom_categories ADD COLUMN IF NOT EXISTS user_id TEXT;
+      ALTER TABLE custom_categories ADD COLUMN IF NOT EXISTS emoji VARCHAR(20) DEFAULT '📌';
     `);
 
     // Drop the old unique constraint on custom_categories.name (now scoped per user)
@@ -265,12 +266,12 @@ app.post('/api/learning-data', async (req, res) => {
 
 // ─── Custom Categories API ───
 
-// GET all custom categories
+// GET all custom categories (returns { name, emoji }[])
 app.get('/api/custom-categories', async (req, res) => {
   const userId = req.auth.userId;
   try {
-    const result = await pool.query('SELECT name FROM custom_categories WHERE user_id = $1 ORDER BY id', [userId]);
-    res.json(result.rows.map(r => r.name));
+    const result = await pool.query('SELECT name, emoji FROM custom_categories WHERE user_id = $1 ORDER BY id', [userId]);
+    res.json(result.rows.map(r => ({ name: r.name, emoji: r.emoji || '📌' })));
   } catch (err) {
     console.error('Error fetching custom categories:', err);
     res.status(500).json({ error: 'Failed to fetch custom categories' });
@@ -280,11 +281,12 @@ app.get('/api/custom-categories', async (req, res) => {
 // POST new custom category
 app.post('/api/custom-categories', async (req, res) => {
   const userId = req.auth.userId;
-  const { name } = req.body;
+  const { name, emoji } = req.body;
+  const emojiVal = (emoji && String(emoji).trim()) ? String(emoji).trim().slice(0, 10) : '📌';
   try {
     await pool.query(
-      'INSERT INTO custom_categories (name, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [name, userId]
+      'INSERT INTO custom_categories (name, emoji, user_id) VALUES ($1, $2, $3)',
+      [name, emojiVal, userId]
     );
     res.json({ success: true });
   } catch (err) {
@@ -293,12 +295,49 @@ app.post('/api/custom-categories', async (req, res) => {
   }
 });
 
+// PUT update custom category (name and/or emoji); :name is the current name
+app.put('/api/custom-categories/:name', async (req, res) => {
+  const userId = req.auth.userId;
+  const oldName = decodeURIComponent(req.params.name);
+  const { name: newName, emoji: newEmoji } = req.body;
+  try {
+    const updates = [];
+    const values = [];
+    let n = 1;
+    if (newName != null && String(newName).trim() !== '' && String(newName).trim() !== oldName) {
+      updates.push(`name = $${n++}`);
+      values.push(String(newName).trim());
+    }
+    if (newEmoji !== undefined) {
+      updates.push(`emoji = $${n++}`);
+      values.push((newEmoji && String(newEmoji).trim()) ? String(newEmoji).trim().slice(0, 10) : '📌');
+    }
+    if (updates.length === 0) {
+      return res.json({ success: true });
+    }
+    values.push(oldName, userId);
+    await pool.query(
+      `UPDATE custom_categories SET ${updates.join(', ')} WHERE name = $${n} AND user_id = $${n + 1}`,
+      values
+    );
+    if (newName != null && String(newName).trim() !== '' && String(newName).trim() !== oldName) {
+      const nameVal = String(newName).trim();
+      await pool.query('UPDATE items SET category = $1 WHERE category = $2 AND user_id = $3', [nameVal, oldName, userId]);
+      await pool.query('UPDATE learning_data SET category = $1 WHERE category = $2 AND user_id = $3', [nameVal, oldName, userId]);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating custom category:', err);
+    res.status(500).json({ error: 'Failed to update custom category' });
+  }
+});
+
 // DELETE custom category
 app.delete('/api/custom-categories/:name', async (req, res) => {
   const userId = req.auth.userId;
   const { name } = req.params;
   try {
-    await pool.query('DELETE FROM custom_categories WHERE name=$1 AND user_id=$2', [name, userId]);
+    await pool.query('DELETE FROM custom_categories WHERE name=$1 AND user_id=$2', [decodeURIComponent(name), userId]);
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting custom category:', err);
