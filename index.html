@@ -91,8 +91,6 @@ const Check = (p) => React.createElement(Icon, p, React.createElement('polyline'
 const Calendar = (p) => React.createElement(Icon, p, React.createElement('rect', { width: 18, height: 18, x: 3, y: 4, rx: 2, ry: 2 }), React.createElement('line', { x1: 16, x2: 16, y1: 2, y2: 6 }), React.createElement('line', { x1: 8, x2: 8, y1: 2, y2: 6 }), React.createElement('line', { x1: 3, x2: 21, y1: 10, y2: 10 }));
 const FileText = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z' }), React.createElement('path', { d: 'M14 2v4a2 2 0 0 0 2 2h4' }), React.createElement('path', { d: 'M10 9H8' }), React.createElement('path', { d: 'M16 13H8' }), React.createElement('path', { d: 'M16 17H8' }));
 const GripVertical = (p) => React.createElement(Icon, p, React.createElement('circle', { cx: 9, cy: 12, r: 1 }), React.createElement('circle', { cx: 9, cy: 5, r: 1 }), React.createElement('circle', { cx: 9, cy: 19, r: 1 }), React.createElement('circle', { cx: 15, cy: 12, r: 1 }), React.createElement('circle', { cx: 15, cy: 5, r: 1 }), React.createElement('circle', { cx: 15, cy: 19, r: 1 }));
-const List = (p) => React.createElement(Icon, p, React.createElement('line', { x1: 8, x2: 21, y1: 6, y2: 6 }), React.createElement('line', { x1: 8, x2: 21, y1: 12, y2: 12 }), React.createElement('line', { x1: 8, x2: 21, y1: 18, y2: 18 }), React.createElement('line', { x1: 3, x2: 3.01, y1: 6, y2: 6 }), React.createElement('line', { x1: 3, x2: 3.01, y1: 12, y2: 12 }), React.createElement('line', { x1: 3, x2: 3.01, y1: 18, y2: 18 }));
-const CalendarDays = (p) => React.createElement(Icon, p, React.createElement('rect', { width: 18, height: 18, x: 3, y: 4, rx: 2, ry: 2 }), React.createElement('line', { x1: 16, x2: 16, y1: 2, y2: 6 }), React.createElement('line', { x1: 8, x2: 8, y1: 2, y2: 6 }), React.createElement('line', { x1: 3, x2: 21, y1: 10, y2: 10 }), React.createElement('path', { d: 'M8 14h.01' }), React.createElement('path', { d: 'M12 14h.01' }), React.createElement('path', { d: 'M16 14h.01' }), React.createElement('path', { d: 'M8 18h.01' }), React.createElement('path', { d: 'M12 18h.01' }), React.createElement('path', { d: 'M16 18h.01' }));
 const Settings = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z' }), React.createElement('circle', { cx: 12, cy: 12, r: 3 }));
 const X = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M18 6 6 18' }), React.createElement('path', { d: 'm6 6 12 12' }));
 const Pencil = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z' }));
@@ -113,7 +111,6 @@ const VoiceTaskManager = () => {
   const [expandedNotes, setExpandedNotes] = useState({});
   const [learningData, setLearningData] = useState([]);
   const [draggedItem, setDraggedItem] = useState(null);
-  const [view, setView] = useState('list');
   const [customCategories, setCustomCategories] = useState([]); // [{ name, emoji }, ...]
   const [newCategoryEmoji, setNewCategoryEmoji] = useState('📌');
   const [editingCategory, setEditingCategory] = useState(null); // { oldName, name, emoji } or null
@@ -121,9 +118,20 @@ const VoiceTaskManager = () => {
   const [newCategory, setNewCategory] = useState('');
   const [showCompleted, setShowCompleted] = useState(false);
   const [justCompletedId, setJustCompletedId] = useState(null);
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  const [dragOverGroupKey, setDragOverGroupKey] = useState(null);
+  const [customDropDate, setCustomDropDate] = useState('');
+  const [isCustomDateDragOver, setIsCustomDateDragOver] = useState(false);
   const recognitionRef = useRef(null);
+  const suppressGroupToggleRef = useRef(false);
 
   const defaultCategories = ['work', 'personal', 'project'];
+  const toLocalDateString = (date = new Date()) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
 
   // Load items, learning data, and custom categories on mount
   useEffect(() => {
@@ -292,18 +300,18 @@ const VoiceTaskManager = () => {
     const day = d.getDay();
     const diff = day === 0 ? 0 : 7 - day; // Sunday = end of week
     d.setDate(d.getDate() + diff);
-    return d.toISOString().split('T')[0];
+    return toLocalDateString(d);
   };
 
   const getEndOfMonth = () => {
     const d = new Date();
     d.setMonth(d.getMonth() + 1, 0); // last day of current month
-    return d.toISOString().split('T')[0];
+    return toLocalDateString(d);
   };
 
   const applyDefaultDueDate = (item) => {
     if (item.dueDate) return item;
-    const today = new Date().toISOString().split('T')[0];
+    const today = toLocalDateString();
     if (item.type === 'idea') {
       return { ...item, dueDate: getEndOfMonth() };
     }
@@ -350,7 +358,7 @@ For EACH separate task or idea, create an object with:
 Rules:
 - Separate multiple items if the input contains "and", commas, semicolons, or line breaks suggesting multiple tasks
 - Extract due dates from phrases like "by Friday", "tomorrow", "next week", "end of month"
-- Today is ${new Date().toISOString().split('T')[0]}
+- Today is ${toLocalDateString()}
 - type: "task" if actionable, "idea" if conceptual
 - category: choose the most appropriate from available categories
 - priority: high if urgent/time-sensitive, medium if standard, low if someday/maybe
@@ -503,7 +511,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     const updated = { ...item, ...editValues };
     // If category changed to 'work' and no due date set, default to today
     if (updated.category === 'work' && !updated.dueDate) {
-      updated.dueDate = new Date().toISOString().split('T')[0];
+      updated.dueDate = toLocalDateString();
     }
     try {
       await fetch(`${API_BASE}/api/items/${item.id}`, {
@@ -547,30 +555,35 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
 
   const handleDragStart = (e, item) => {
     setDraggedItem(item);
+    setCustomDropDate(item.dueDate || toLocalDateString());
     e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragOver = (e, targetItem) => {
     e.preventDefault();
     if (!draggedItem || draggedItem.id === targetItem.id) return;
+    if (draggedItem.dueDate !== targetItem.dueDate) return;
 
-    const draggedIdx = filteredItems.findIndex(i => i.id === draggedItem.id);
-    const targetIdx = filteredItems.findIndex(i => i.id === targetItem.id);
+    const sameDueDateItems = items
+      .filter(i => (i.dueDate || null) === (targetItem.dueDate || null))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-    if (draggedIdx === targetIdx) return;
+    const draggedIdx = sameDueDateItems.findIndex(i => i.id === draggedItem.id);
+    const targetIdx = sameDueDateItems.findIndex(i => i.id === targetItem.id);
 
-    const newFilteredItems = [...filteredItems];
-    newFilteredItems.splice(draggedIdx, 1);
-    newFilteredItems.splice(targetIdx, 0, draggedItem);
+    if (draggedIdx === -1 || targetIdx === -1 || draggedIdx === targetIdx) return;
 
-    const reorderedIds = newFilteredItems.map(i => i.id);
+    const reorderedGroup = [...sameDueDateItems];
+    const [moved] = reorderedGroup.splice(draggedIdx, 1);
+    reorderedGroup.splice(targetIdx, 0, moved);
+    const orderById = new Map(reorderedGroup.map((item, idx) => [item.id, idx]));
+
     const newItems = items.map(item => {
-      const newIndex = reorderedIds.indexOf(item.id);
-      if (newIndex !== -1) {
-        return { ...item, order: newIndex };
+      if (orderById.has(item.id)) {
+        return { ...item, order: orderById.get(item.id) };
       }
       return item;
-    }).sort((a, b) => (a.order || 0) - (b.order || 0));
+    });
 
     setItems(newItems);
     fetch(`${API_BASE}/api/items`, {
@@ -582,48 +595,8 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
 
   const handleDragEnd = () => {
     setDraggedItem(null);
-    setCalendarDragOverDate(null);
-  };
-
-  const handleCalendarDragOver = (e, date) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    const dateStr = date.toISOString().split('T')[0];
-    if (calendarDragOverDate !== dateStr) {
-      setCalendarDragOverDate(dateStr);
-    }
-  };
-
-  const handleCalendarDragLeave = (e, date) => {
-    const dateStr = date.toISOString().split('T')[0];
-    if (calendarDragOverDate === dateStr) {
-      setCalendarDragOverDate(null);
-    }
-  };
-
-  const handleCalendarDrop = async (e, date) => {
-    e.preventDefault();
-    setCalendarDragOverDate(null);
-    if (!draggedItem) return;
-
-    const newDueDate = date.toISOString().split('T')[0];
-    if (draggedItem.dueDate === newDueDate) {
-      setDraggedItem(null);
-      return;
-    }
-
-    const updated = { ...draggedItem, dueDate: newDueDate };
-    try {
-      await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated)
-      });
-      setItems(items.map(i => i.id === draggedItem.id ? updated : i));
-    } catch (err) {
-      setError('Failed to update due date');
-    }
-    setDraggedItem(null);
+    setDragOverGroupKey(null);
+    setIsCustomDateDragOver(false);
   };
 
   const sortedItems = [...items].sort((a, b) => {
@@ -640,6 +613,50 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     return true;
   });
 
+  const todayStr = toLocalDateString();
+
+  const getGroupLabel = (dateStr) => {
+    if (dateStr === 'overdue') return 'Overdue';
+    if (!dateStr) return 'No Date';
+    if (dateStr === todayStr) return 'Today';
+    const tomorrow = new Date(`${todayStr}T12:00:00`);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = toLocalDateString(tomorrow);
+    if (dateStr === tomorrowStr) return 'Tomorrow';
+    const d = new Date(dateStr + 'T12:00:00');
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+
+  const groupedItems = (() => {
+    const overdue = [];
+    const byDate = new Map();
+    let noDate = [];
+    for (const item of filteredItems) {
+      const due = item.dueDate || null;
+      if (due && due < todayStr) overdue.push(item);
+      else if (due) {
+        if (!byDate.has(due)) byDate.set(due, []);
+        byDate.get(due).push(item);
+      } else noDate.push(item);
+    }
+    const sortedDates = [...byDate.keys()].sort();
+    const groups = [];
+    if (overdue.length) {
+      const sorted = [...overdue].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      groups.push({ key: 'overdue', dueDate: 'overdue', label: 'Overdue', isToday: false, isOverdue: true, items: sorted });
+    }
+    for (const d of sortedDates) {
+      const list = byDate.get(d);
+      const sorted = [...list].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      groups.push({ key: d, dueDate: d, label: getGroupLabel(d), isToday: d === todayStr, isOverdue: false, items: sorted });
+    }
+    if (noDate.length) {
+      const sorted = [...noDate].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      groups.push({ key: 'no-date', dueDate: null, label: 'No Date', isToday: false, isOverdue: false, items: sorted });
+    }
+    return groups;
+  })();
+
   const stats = {
     total: items.length,
     tasks: items.filter(i => i.type === 'task').length,
@@ -647,45 +664,95 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     completed: items.filter(i => i.completed).length
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return null;
-    const date = new Date(dateString);
-    const today = new Date();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    
-    if (date.toDateString() === today.toDateString()) return 'Today';
-    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
-    
-    const diff = Math.ceil((date - today) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return 'Overdue';
-    if (diff < 7) return `${diff}d`;
-    
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const toggleGroup = (key) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
-  // Calendar view helpers
-  const getCalendarDays = () => {
-    const today = new Date();
-    const days = [];
-    
-    for (let i = -3; i < 14; i++) {
-      const date = new Date(today);
-      date.setDate(date.getDate() + i);
-      days.push(date);
+  const handleGroupDragOver = (e, groupKey) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverGroupKey !== groupKey) setDragOverGroupKey(groupKey);
+  };
+
+  const handleGroupDragLeave = (e) => {
+    const related = e.relatedTarget;
+    if (!e.currentTarget.contains(related)) setDragOverGroupKey(null);
+  };
+
+  const handleGroupDrop = async (e, groupKey) => {
+    e.preventDefault();
+    e.stopPropagation();
+    suppressGroupToggleRef.current = true;
+    setTimeout(() => { suppressGroupToggleRef.current = false; }, 0);
+    setDragOverGroupKey(null);
+    if (!draggedItem) return;
+    let newDueDate;
+    if (groupKey === 'no-date') newDueDate = null;
+    else if (groupKey === 'overdue') {
+      const yesterday = new Date(`${todayStr}T12:00:00`);
+      yesterday.setDate(yesterday.getDate() - 1);
+      newDueDate = toLocalDateString(yesterday);
+    } else newDueDate = groupKey;
+    if ((draggedItem.dueDate || null) === newDueDate) {
+      setDraggedItem(null);
+      return;
     }
-    
-    return days;
+    const targetGroupItems = items
+      .filter(i => i.id !== draggedItem.id && (i.dueDate || null) === newDueDate)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const updated = { ...draggedItem, dueDate: newDueDate, order: targetGroupItems.length };
+    try {
+      await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+    } catch (err) {
+      setError('Failed to update due date');
+    }
+    setDraggedItem(null);
   };
 
-  const getItemsForDate = (date) => {
-    const dateStr = date.toISOString().split('T')[0];
-    return filteredItems.filter(item => item.dueDate === dateStr);
+  const handleCustomDateDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!isCustomDateDragOver) setIsCustomDateDragOver(true);
   };
 
-  const isToday = (date) => {
-    const today = new Date();
-    return date.toDateString() === today.toDateString();
+  const handleCustomDateDragLeave = (e) => {
+    const related = e.relatedTarget;
+    if (!e.currentTarget.contains(related)) setIsCustomDateDragOver(false);
+  };
+
+  const handleCustomDateDrop = async (e) => {
+    e.preventDefault();
+    setIsCustomDateDragOver(false);
+    if (!draggedItem || !customDropDate) return;
+    if ((draggedItem.dueDate || null) === customDropDate) {
+      setDraggedItem(null);
+      return;
+    }
+    const targetGroupItems = items
+      .filter(i => i.id !== draggedItem.id && (i.dueDate || null) === customDropDate)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const updated = { ...draggedItem, dueDate: customDropDate, order: targetGroupItems.length };
+    try {
+      await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+    } catch (err) {
+      setError('Failed to update due date');
+    }
+    setDraggedItem(null);
   };
 
   // Earthy palette (light background): bg tint, left border, badge tint, text, emoji
@@ -734,7 +801,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
   const getCardBackground = (item) => {
     if (item.completed) return 'rgba(79,124,89,0.06)'; // subtle fern
     const now = Date.now();
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = toLocalDateString();
     if (item.dueDate && item.dueDate < todayStr) return 'rgba(198,93,59,0.08)';   // pale terracotta (overdue)
     if (item.dueDate && item.dueDate === todayStr) return 'rgba(194,168,62,0.08)'; // pale golden moss (today)
     if (item.createdAt) {
@@ -754,27 +821,6 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
               <span>🌿</span> My Tasks
             </h1>
             <div className="flex items-center gap-2">
-              {/* Pill view toggle */}
-              <div className="flex rounded-full p-1 bg-[#E6D8C3]/50 border border-[#E6D8C3]">
-                <button
-                  onClick={() => setView('list')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    view === 'list' ? 'bg-white text-[#3F6C7A] shadow-sm' : 'text-[#6B6560] hover:text-[#2D2A26]'
-                  }`}
-                >
-                  <List size={16} />
-                  List
-                </button>
-                <button
-                  onClick={() => setView('calendar')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                    view === 'calendar' ? 'bg-white text-[#3F6C7A] shadow-sm' : 'text-[#6B6560] hover:text-[#2D2A26]'
-                  }`}
-                >
-                  <CalendarDays size={16} />
-                  Calendar
-                </button>
-              </div>
               <button
                 onClick={() => setShowCategoryManager(!showCategoryManager)}
                 className="p-2 text-[#6B6560] hover:text-[#2D2A26] hover:bg-[#E6D8C3]/40 rounded-xl transition-colors"
@@ -972,96 +1018,61 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           })}
         </div>
 
-        {/* Calendar View */}
-        {view === 'calendar' && (
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <div className="space-y-3">
-              {getCalendarDays().map(date => {
-                const dayItems = getItemsForDate(date);
-                const dateStr = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                const isoDate = date.toISOString().split('T')[0];
-                const isDragOver = calendarDragOverDate === isoDate;
-
-                return (
-                  <div
-                    key={date.toISOString()}
-                    onDragOver={(e) => handleCalendarDragOver(e, date)}
-                    onDragLeave={(e) => handleCalendarDragLeave(e, date)}
-                    onDrop={(e) => handleCalendarDrop(e, date)}
-                    className={`border-2 rounded-lg p-4 transition-colors ${
-                      isDragOver
-                        ? 'border-indigo-400 bg-indigo-100 ring-2 ring-indigo-300'
-                        : isToday(date)
-                          ? 'border-indigo-500 bg-indigo-50'
-                          : 'border-gray-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className={`font-semibold ${isToday(date) ? 'text-indigo-700' : 'text-gray-800'}`}>
-                        {dateStr} {isToday(date) && '(Today)'}
-                      </h3>
-                      <span className="text-sm text-gray-500">{dayItems.length} items</span>
-                    </div>
-
-                    {dayItems.length === 0 ? (
-                      <p className="text-gray-400 text-sm">{isDragOver ? 'Drop here to reschedule' : 'No tasks scheduled'}</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {dayItems.map(item => (
-                          <div
-                            key={item.id}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, item)}
-                            onDragEnd={handleDragEnd}
-                            className={`bg-white border border-gray-200 rounded p-3 cursor-grab active:cursor-grabbing ${
-                              draggedItem?.id === item.id ? 'opacity-40' : ''
-                            }`}
-                          >
-                            <div className="flex items-start gap-2">
-                              <button
-                                onClick={(e) => toggleComplete(item.id, e)}
-                                className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                                  item.completed
-                                    ? 'bg-green-500 border-green-500'
-                                    : 'border-gray-300 hover:border-green-500'
-                                }`}
-                              >
-                                {item.completed && <Check size={12} className="text-white" />}
-                              </button>
-                              <div className="flex-1">
-                                <p className={`text-sm ${item.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
-                                  {item.text}
-                                </p>
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: getCategoryStyle(item.category).badgeBg, color: getCategoryStyle(item.category).badgeText }}>
-                                    {getCategoryStyle(item.category).emoji} {item.category}
-                                  </span>
-                                  <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={(() => { const p = getPriorityStyle(item.priority); return { backgroundColor: p.badgeBg, color: p.badgeText }; })()}>
-                                    {item.priority}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* List View — color-block task cards */}
-        {view === 'list' && (
-          <div className="space-y-3">
-            {filteredItems.length === 0 ? (
-              <div className="bg-[#FFFBF7] rounded-2xl border border-[#E6D8C3]/80 p-8 text-center text-[#6B6560]">
-                No items found. Add your first task or idea!
+        {/* List View — date-grouped task cards */}
+        <div className="space-y-6">
+          {draggedItem && (
+            <div
+              onDragOver={handleCustomDateDragOver}
+              onDragLeave={handleCustomDateDragLeave}
+              onDrop={handleCustomDateDrop}
+              className={`rounded-xl border-2 border-dashed p-4 transition-all ${isCustomDateDragOver ? 'border-[#3F6C7A] bg-[#E6D8C3]/45 ring-2 ring-[#3F6C7A]' : 'border-[#C8B99F] bg-[#FFFBF7]'}`}
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm text-[#2D2A26] font-medium">
+                  Drop to move "{draggedItem.text}" to:
+                </span>
+                <input
+                  type="date"
+                  value={customDropDate}
+                  onChange={(e) => setCustomDropDate(e.target.value)}
+                  className="px-3 py-2 bg-[#FFFBF7] border border-[#E6D8C3] rounded-xl text-sm text-[#2D2A26] focus:outline-none focus:ring-2 focus:ring-[#3F6C7A]/50"
+                />
+                <span className="text-xs text-[#6B6560]">Choose any date, then drop the card here.</span>
               </div>
-            ) : (
-              filteredItems.map(item => {
+            </div>
+          )}
+          {groupedItems.length === 0 ? (
+            <div className="bg-[#FFFBF7] rounded-2xl border border-[#E6D8C3]/80 p-8 text-center text-[#6B6560]">
+              No items found. Add your first task or idea!
+            </div>
+          ) : (
+            groupedItems.map(group => {
+              const collapsed = collapsedGroups.has(group.key);
+              const isDragOver = dragOverGroupKey === group.key;
+              const headerBg = group.isToday ? 'rgba(194,168,62,0.22)' : group.isOverdue ? 'rgba(198,93,59,0.12)' : (group.dueDate === null ? 'rgba(94,107,115,0.12)' : '#E6D8C3');
+              const dateSuffix = group.isToday ? (` · ${new Date(group.dueDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`) : '';
+              return (
+                <div key={group.key}>
+                  <div
+                    onClick={() => {
+                      if (draggedItem || suppressGroupToggleRef.current) return;
+                      toggleGroup(group.key);
+                    }}
+                    onDragOver={(e) => handleGroupDragOver(e, group.key)}
+                    onDragLeave={handleGroupDragLeave}
+                    onDrop={(e) => handleGroupDrop(e, group.key)}
+                    className={`flex items-center justify-between rounded-xl border-2 px-4 py-2.5 cursor-pointer transition-all select-none ${isDragOver ? 'ring-2 ring-[#3F6C7A] border-[#3F6C7A]' : 'border-transparent'}`}
+                    style={{ backgroundColor: headerBg }}
+                  >
+                    <span className="font-medium text-[#2D2A26] flex items-center gap-2">
+                      <span className={`text-[#6B6560] transition-transform ${collapsed ? 'rotate-0' : 'rotate-90'}`}>▾</span>
+                      {group.label}{dateSuffix}
+                    </span>
+                    <span className="text-sm text-[#6B6560]">{isDragOver ? 'Drop to reschedule' : `${group.items.length} items`}</span>
+                  </div>
+                  {!collapsed && (
+                    <div className="space-y-3 mt-3">
+                      {group.items.map(item => {
                 const catStyle = getCategoryStyle(item.category);
                 const isDragging = draggedItem?.id === item.id;
                 return (
@@ -1194,18 +1205,6 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                               <span className="px-2 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: catStyle.badgeBg, color: catStyle.badgeText }}>
                                 {catStyle.emoji} {item.category}
                               </span>
-                              {item.dueDate && (
-                                <span className="px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1" style={(() => {
-                                  const d = formatDate(item.dueDate);
-                                  const terracotta = { backgroundColor: 'rgba(198,93,59,0.22)', color: '#C65D3B' };
-                                  const goldenMoss = { backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' };
-                                  const lakeBlue = { backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' };
-                                  return d === 'Overdue' ? terracotta : d === 'Today' ? goldenMoss : lakeBlue;
-                                })()}>
-                                  <Calendar size={12} />
-                                  {formatDate(item.dueDate)}
-                                </span>
-                              )}
                               {item.notes && (
                                 <button
                                   onClick={(e) => toggleNotes(item.id, e)}
@@ -1235,10 +1234,15 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                     </div>
                   )}
                 </div>
-              ); })
-            )}
-          </div>
-        )}
+                      );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
 
         {/* Toggle to show/hide completed items */}
         {items.some(i => i.completed) && (
