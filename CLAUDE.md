@@ -7,9 +7,12 @@ A simple, voice-enabled task management application and note taker built with Re
 **Key features:**
   - User authentication via Clerk (sign-in/sign-up, per-user data isolation)
   - Voice input (Web Speech API)
-  - AI-powered task categorization (Anthropic Claude API), spell checks, and breakdown
-  - Drag-and-drop reordering, calendar view, custom categories
+  - AI-powered task categorization (Anthropic Claude API), spell checks, and multi-task breakdown
+  - Drag-and-drop reordering (list + calendar date rescheduling), calendar view, custom categories with emoji
+  - Editable custom categories (name + emoji) with cascade updates to items/learning data
+  - Confetti animation on task completion
   - A learning system that improves categorization from user corrections
+  - Earthy/warm UI theme (Source Sans 3, Cedarville Cursive header, color-coded task cards)
 
 ## Repository Structure
 
@@ -34,6 +37,7 @@ daily-task/
 | UI Framework | React 18 + ReactDOM 18            | CDN (unpkg) |
 | JSX          | Babel Standalone (in-browser)     | CDN (unpkg) |
 | Styling      | Tailwind CSS                      | CDN        |
+| Fonts        | Source Sans 3 + Cedarville Cursive | Google Fonts CDN |
 | Icons        | Inline SVG components (custom)    | Embedded   |
 | Backend      | Express 5                         | npm        |
 | Database     | PostgreSQL (Neon serverless)      | npm (pg, @neondatabase/serverless) |
@@ -58,10 +62,15 @@ The app uses one React component: `VoiceTaskManager`. It manages all state via R
 
 - `items` — Array of task/idea objects (fetched from `/api/items`)
 - `learningData` — Past user corrections for AI categorization (fetched from `/api/learning-data`)
-- `customCategories` — User-defined categories (fetched from `/api/custom-categories`)
+- `customCategories` — User-defined categories as `[{ name, emoji }]` (fetched from `/api/custom-categories`)
 - `view` — Current view mode: `'list'` or `'calendar'`
-- `filter` — Type filter: `'all'`, `'tasks'`, or `'ideas'`
+- `filter` — Type filter: `'all'`, `'task'`, or `'idea'`
 - `categoryFilter` — Category filter
+- `showCompleted` — Toggle visibility of completed items (default: hidden)
+- `showCategoryManager` — Toggle the category management panel
+- `editingCategory` — Tracks in-progress category edit `{ oldName, name, emoji }`
+- `draggedItem` — Currently dragged item for reordering / calendar rescheduling
+- `calendarDragOverDate` — Date string of the calendar cell being dragged over
 
 ### API Endpoints
 
@@ -77,11 +86,12 @@ DELETE /api/items/:id          # Delete item (scoped to user)
 GET    /api/learning-data      # Fetch learning corrections (scoped to user)
 POST   /api/learning-data      # Save a correction (scoped to user)
 
-GET    /api/custom-categories  # Fetch custom categories (scoped to user)
-POST   /api/custom-categories  # Add a category (scoped to user)
-DELETE /api/custom-categories/:name  # Remove a category (scoped to user)
+GET    /api/custom-categories           # Fetch custom categories as [{ name, emoji }] (scoped to user)
+POST   /api/custom-categories           # Add a category with name + emoji (scoped to user)
+PUT    /api/custom-categories/:name     # Update category name/emoji, cascades to items + learning_data (scoped to user)
+DELETE /api/custom-categories/:name     # Remove a category (scoped to user)
 
-POST   /api/categorize         # Proxy to Anthropic Claude API
+POST   /api/categorize         # Proxy to Anthropic Claude API (server validates model + max_tokens)
 ```
 
 ### Data Model
@@ -108,15 +118,17 @@ PostgreSQL (Neon serverless) with three tables:
 
 - **`items`** — Tasks and ideas with all fields from the data model, scoped by `user_id`
 - **`learning_data`** — Past user corrections (text, type, category, priority), scoped by `user_id`
-- **`custom_categories`** — User-defined category names, scoped by `user_id`
+- **`custom_categories`** — User-defined category names + emoji, scoped by `user_id`. Has a unique index on `(name, user_id)`.
 
 All tables include a `user_id TEXT` column that stores the Clerk user ID. Every query filters by the authenticated user's ID to ensure data isolation between users.
 
 Tables are auto-created on server startup via `initDB()` in `server.js`. Schema is also defined in `src/schema.js` using Drizzle ORM for migration tooling.
 
+A one-time migration middleware in `server.js` claims any rows with `user_id IS NULL` (pre-auth legacy data) for the first authenticated user who hits the API.
+
 ### AI Integration
 
-The frontend sends categorization requests to `POST /api/categorize`. The server proxies these to the Anthropic Messages API using `ANTHROPIC_API_KEY` from `.env`. Falls back to default values (`type: 'task'`, `category: 'personal'`, `priority: 'medium'`) when the API is unavailable or returns an error.
+The frontend sends categorization requests to `POST /api/categorize`. The server validates the request (restricts model to an allowlist, caps `max_tokens`) and proxies to the Anthropic Messages API using `ANTHROPIC_API_KEY` from `.env`. Falls back to default values (`type: 'task'`, `category: 'personal'`, `priority: 'medium'`) when the API is unavailable or returns an error. The AI prompt also applies default due dates (work tasks → today, other tasks → end of week, ideas → end of month) and spell/grammar corrections.
 
 ## Development Workflow
 
@@ -148,11 +160,20 @@ npm start
 
 Deployed on Vercel. Configuration in `.vercel/` directory.
 
+## UI Design
+
+The frontend uses an earthy/warm light theme:
+- **Background**: `#F5F0E8` (warm cream), cards: `#FFFBF7` (warm white)
+- **Fonts**: Source Sans 3 (body), Cedarville Cursive (header title)
+- **Category color system**: Each category gets a color that tints the card background (~18% opacity) with a 4px left border. Default categories: work (Storm Indigo `#4B4F73`), personal (Fern Green `#4F7C59`), project (Terracotta `#C65D3B`). Custom categories cycle through Muted Berry, Lake Blue, Golden Moss, River Slate.
+- **Animations**: Confetti on task completion (30 particles, 800ms), mic pulse when listening, checkbox pop on complete, priority dot pulse for high-priority items.
+- **Conditional card backgrounds**: Pale green for new tasks (<5 min), pale red for overdue, pale yellow for due today.
+
 ## Code Conventions
 
 - **No JSX for icons** — Icon components use `React.createElement()` directly
 - **Hooks only** — No class components; all state managed via `useState`, `useEffect`, `useRef`
-- **Tailwind utility classes** — All styling is inline via Tailwind CSS classes
+- **Tailwind utility classes + inline styles** — Styling is primarily Tailwind classes with CSS custom properties and inline `style` for dynamic color theming
 - **Async/await** — All API calls and storage operations use async/await
 - **Raw SQL** — Backend uses `pg` Pool with raw SQL queries (not the Drizzle query builder)
 

@@ -71,6 +71,11 @@ async function initDB() {
       ALTER TABLE custom_categories DROP CONSTRAINT IF EXISTS custom_categories_name_key;
     `).catch(() => {});
 
+    // Add per-user unique constraint on custom_categories(name, user_id)
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS custom_categories_name_user_id_idx ON custom_categories (name, user_id);
+    `).catch(() => {});
+
     console.log('Database tables initialized');
   } finally {
     client.release();
@@ -354,6 +359,14 @@ app.post('/api/categorize', async (req, res) => {
   }
 
   try {
+    // Server-side validation: only allow expected model and cap max_tokens
+    const allowedModels = ['claude-sonnet-4-20250514'];
+    const body = {
+      model: allowedModels.includes(req.body.model) ? req.body.model : allowedModels[0],
+      max_tokens: Math.min(Number(req.body.max_tokens) || 2000, 4000),
+      messages: req.body.messages,
+    };
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -361,7 +374,7 @@ app.post('/api/categorize', async (req, res) => {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(body),
     });
 
     const data = await response.json();

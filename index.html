@@ -407,8 +407,8 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
 
     const parsedItems = await categorizeWithClaude(textInput);
 
-    const newItems = parsedItems.map(item => ({
-      id: Math.floor(Date.now() + Math.random() * 1000),
+    const newItems = parsedItems.map((item, idx) => ({
+      id: Date.now() * 1000 + Math.floor(Math.random() * 1000) + idx,
       text: item.text,
       completed: false,
       createdAt: new Date().toISOString(),
@@ -824,7 +824,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                   type="text"
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addCustomCategory()}
+                  onKeyDown={(e) => e.key === 'Enter' && addCustomCategory()}
                   placeholder="New category name..."
                   className="flex-1 min-w-[140px] px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
@@ -900,7 +900,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
               type="text"
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && addItem()}
+              onKeyDown={(e) => e.key === 'Enter' && addItem()}
               placeholder="Add task(s) - separate multiple with 'and' or commas..."
               className="input-focus-glow flex-1 px-4 py-3 bg-white border border-[#E6D8C3] rounded-xl text-[#2D2A26] placeholder:text-[#6B6560] transition-shadow"
             />
