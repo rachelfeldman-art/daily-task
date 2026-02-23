@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 const { clerkMiddleware, requireAuth } = require('@clerk/express');
+const { z } = require('zod');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +27,85 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+// ─── Validation Schemas ───
+
+const itemSchema = z.object({
+  id: z.number().int().positive(),
+  text: z.string().min(1).max(1000),
+  completed: z.boolean().optional().default(false),
+  createdAt: z.string().optional(),
+  type: z.enum(['task', 'idea']),
+  category: z.string().min(1).max(100),
+  priority: z.enum(['high', 'medium', 'low']),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  notes: z.string().max(5000).optional().default(''),
+  order: z.number().int().min(0).optional().default(0)
+});
+
+const itemUpdateSchema = z.object({
+  text: z.string().min(1).max(1000),
+  completed: z.boolean(),
+  type: z.enum(['task', 'idea']),
+  category: z.string().min(1).max(100),
+  priority: z.enum(['high', 'medium', 'low']),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  notes: z.string().max(5000).optional(),
+  order: z.number().int().min(0).optional()
+});
+
+const learningDataSchema = z.object({
+  text: z.string().min(1).max(1000),
+  type: z.enum(['task', 'idea']),
+  category: z.string().min(1).max(100),
+  priority: z.enum(['high', 'medium', 'low'])
+});
+
+const customCategorySchema = z.object({
+  name: z.string().min(1).max(100).toLowerCase(),
+  emoji: z.string().min(1).max(10).optional().default('📌')
+});
+
+const customCategoryUpdateSchema = z.object({
+  name: z.string().min(1).max(100).toLowerCase().optional(),
+  emoji: z.string().min(1).max(10).optional()
+}).refine(data => data.name !== undefined || data.emoji !== undefined, {
+  message: 'At least one of name or emoji must be provided'
+});
+
+const categorizeRequestSchema = z.object({
+  model: z.string(),
+  max_tokens: z.number().int().min(1).max(4000),
+  messages: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().min(1).max(10000)
+  })).min(1)
+});
+
+// Validation middleware factory
+const validate = (schema, source = 'body') => {
+  return (req, res, next) => {
+    try {
+      const data = source === 'body' ? req.body : req.params;
+      const validated = schema.parse(data);
+      if (source === 'body') {
+        req.body = validated;
+      }
+      next();
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+      next(error);
+    }
+  };
+};
 
 // Initialize database tables
 async function initDB() {
@@ -134,7 +214,7 @@ app.get('/api/items', async (req, res) => {
 });
 
 // POST new item(s)
-app.post('/api/items', async (req, res) => {
+app.post('/api/items', validate(z.union([itemSchema, z.array(itemSchema)])), async (req, res) => {
   const userId = req.auth.userId;
   const items = Array.isArray(req.body) ? req.body : [req.body];
   const client = await pool.connect();
@@ -174,18 +254,25 @@ app.post('/api/items', async (req, res) => {
 });
 
 // PUT update item
-app.put('/api/items/:id', async (req, res) => {
+app.put('/api/items/:id', validate(itemUpdateSchema), async (req, res) => {
   const userId = req.auth.userId;
   const { id } = req.params;
   const { text, completed, type, category, priority, dueDate, notes, order } = req.body;
+
+  // Validate ID is a valid number
+  const itemId = parseInt(id);
+  if (isNaN(itemId) || itemId <= 0) {
+    return res.status(400).json({ error: 'Invalid item ID' });
+  }
+
   try {
     const result = await pool.query(
       `UPDATE items SET text=$1, completed=$2, type=$3, category=$4, priority=$5, due_date=$6, notes=$7, sort_order=$8
        WHERE id=$9 AND user_id=$10 RETURNING *`,
-      [text, completed, type, category, priority, dueDate || null, notes || '', order || 0, id, userId]
+      [text, completed, type, category, priority, dueDate || null, notes || '', order || 0, itemId, userId]
     );
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Item not found' });
+      return res.status(404).json({ error: 'Item not found or unauthorized' });
     }
     res.json(result.rows[0]);
   } catch (err) {
@@ -195,7 +282,7 @@ app.put('/api/items/:id', async (req, res) => {
 });
 
 // PUT bulk update items (for reordering)
-app.put('/api/items', async (req, res) => {
+app.put('/api/items', validate(z.array(itemSchema).min(1).max(1000)), async (req, res) => {
   const userId = req.auth.userId;
   const items = req.body;
   const client = await pool.connect();
@@ -223,8 +310,18 @@ app.put('/api/items', async (req, res) => {
 app.delete('/api/items/:id', async (req, res) => {
   const userId = req.auth.userId;
   const { id } = req.params;
+
+  // Validate ID is a valid number
+  const itemId = parseInt(id);
+  if (isNaN(itemId) || itemId <= 0) {
+    return res.status(400).json({ error: 'Invalid item ID' });
+  }
+
   try {
-    await pool.query('DELETE FROM items WHERE id=$1 AND user_id=$2', [id, userId]);
+    const result = await pool.query('DELETE FROM items WHERE id=$1 AND user_id=$2 RETURNING id', [itemId, userId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item not found or unauthorized' });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting item:', err);
@@ -254,7 +351,7 @@ app.get('/api/learning-data', async (req, res) => {
 });
 
 // POST learning data entry
-app.post('/api/learning-data', async (req, res) => {
+app.post('/api/learning-data', validate(learningDataSchema), async (req, res) => {
   const userId = req.auth.userId;
   const { text, type, category, priority } = req.body;
   try {
@@ -284,7 +381,7 @@ app.get('/api/custom-categories', async (req, res) => {
 });
 
 // POST new custom category
-app.post('/api/custom-categories', async (req, res) => {
+app.post('/api/custom-categories', validate(customCategorySchema), async (req, res) => {
   const userId = req.auth.userId;
   const { name, emoji } = req.body;
   const emojiVal = (emoji && String(emoji).trim()) ? String(emoji).trim().slice(0, 10) : '📌';
@@ -295,17 +392,31 @@ app.post('/api/custom-categories', async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) {
+    // Check for unique constraint violation
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Category already exists' });
+    }
     console.error('Error adding custom category:', err);
     res.status(500).json({ error: 'Failed to add custom category' });
   }
 });
 
 // PUT update custom category (name and/or emoji); :name is the current name
-app.put('/api/custom-categories/:name', async (req, res) => {
+app.put('/api/custom-categories/:name', validate(customCategoryUpdateSchema), async (req, res) => {
   const userId = req.auth.userId;
   const oldName = decodeURIComponent(req.params.name);
+
+  // Validate oldName
+  if (!oldName || oldName.length === 0 || oldName.length > 100) {
+    return res.status(400).json({ error: 'Invalid category name in URL' });
+  }
+
   const { name: newName, emoji: newEmoji } = req.body;
+
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+
     const updates = [];
     const values = [];
     let n = 1;
@@ -318,22 +429,37 @@ app.put('/api/custom-categories/:name', async (req, res) => {
       values.push((newEmoji && String(newEmoji).trim()) ? String(newEmoji).trim().slice(0, 10) : '📌');
     }
     if (updates.length === 0) {
+      await client.query('COMMIT');
       return res.json({ success: true });
     }
     values.push(oldName, userId);
-    await pool.query(
-      `UPDATE custom_categories SET ${updates.join(', ')} WHERE name = $${n} AND user_id = $${n + 1}`,
+    const result = await client.query(
+      `UPDATE custom_categories SET ${updates.join(', ')} WHERE name = $${n} AND user_id = $${n + 1} RETURNING *`,
       values
     );
+
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Category not found or unauthorized' });
+    }
+
     if (newName != null && String(newName).trim() !== '' && String(newName).trim() !== oldName) {
       const nameVal = String(newName).trim();
-      await pool.query('UPDATE items SET category = $1 WHERE category = $2 AND user_id = $3', [nameVal, oldName, userId]);
-      await pool.query('UPDATE learning_data SET category = $1 WHERE category = $2 AND user_id = $3', [nameVal, oldName, userId]);
+      await client.query('UPDATE items SET category = $1 WHERE category = $2 AND user_id = $3', [nameVal, oldName, userId]);
+      await client.query('UPDATE learning_data SET category = $1 WHERE category = $2 AND user_id = $3', [nameVal, oldName, userId]);
     }
+
+    await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Category name already exists' });
+    }
     console.error('Error updating custom category:', err);
     res.status(500).json({ error: 'Failed to update custom category' });
+  } finally {
+    client.release();
   }
 });
 
@@ -341,8 +467,18 @@ app.put('/api/custom-categories/:name', async (req, res) => {
 app.delete('/api/custom-categories/:name', async (req, res) => {
   const userId = req.auth.userId;
   const { name } = req.params;
+  const categoryName = decodeURIComponent(name);
+
+  // Validate category name
+  if (!categoryName || categoryName.length === 0 || categoryName.length > 100) {
+    return res.status(400).json({ error: 'Invalid category name' });
+  }
+
   try {
-    await pool.query('DELETE FROM custom_categories WHERE name=$1 AND user_id=$2', [decodeURIComponent(name), userId]);
+    const result = await pool.query('DELETE FROM custom_categories WHERE name=$1 AND user_id=$2 RETURNING id', [categoryName, userId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Category not found or unauthorized' });
+    }
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting custom category:', err);
@@ -352,7 +488,7 @@ app.delete('/api/custom-categories/:name', async (req, res) => {
 
 // ─── Categorize API (Anthropic proxy) ───
 
-app.post('/api/categorize', async (req, res) => {
+app.post('/api/categorize', validate(categorizeRequestSchema), async (req, res) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return res.status(503).json({ error: 'API key not configured' });
