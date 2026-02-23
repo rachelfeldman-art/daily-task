@@ -77,7 +77,7 @@
   <div id="root"></div>
   
   <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 // Inline SVG icons (no Lucide dependency)
 const Icon = ({ size = 24, children, className = '' }) =>
@@ -95,8 +95,171 @@ const Settings = (p) => React.createElement(Icon, p, React.createElement('path',
 const X = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M18 6 6 18' }), React.createElement('path', { d: 'm6 6 12 12' }));
 const Pencil = (p) => React.createElement(Icon, p, React.createElement('path', { d: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z' }));
 
-// API base URL - same origin when served by Express
+// Constants
 const API_BASE = '';
+const DEFAULT_CATEGORIES = ['work', 'personal', 'project'];
+const CONFETTI_COLORS = ['#C65D3B', '#C2A83E', '#4F7C59', '#9E5B8C', '#3F6C7A', '#E6D8C3'];
+const NEW_TASK_MINUTES = 5;
+const CUSTOM_CATEGORY_COLORS = [
+  { hex: '#9E5B8C' }, { hex: '#3F6C7A' }, { hex: '#C2A83E' }, { hex: '#5E6B73' }
+];
+
+// Utility functions (pure, no state)
+const toLocalDateString = (date = new Date()) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+const hexToRgba = (hex, alpha) => {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+};
+const getEndOfWeek = () => {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = day === 0 ? 0 : 7 - day;
+  d.setDate(d.getDate() + diff);
+  return toLocalDateString(d);
+};
+const getEndOfMonth = () => {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1, 0);
+  return toLocalDateString(d);
+};
+const WEEKDAY_INDEX = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+const getDateForWeekday = (weekdayName) => {
+  const targetDay = WEEKDAY_INDEX[weekdayName];
+  if (targetDay === undefined) return null;
+  const today = new Date();
+  const currentDay = today.getDay();
+  let daysAhead = targetDay - currentDay;
+  if (daysAhead < 0) daysAhead += 7;
+  const d = new Date(today);
+  d.setDate(d.getDate() + daysAhead);
+  return toLocalDateString(d);
+};
+const getWeekdaysFromInput = (rawInput) => {
+  if (!rawInput || typeof rawInput !== 'string') return [];
+  const lower = rawInput.toLowerCase();
+  const withIndex = [];
+  for (const name of Object.keys(WEEKDAY_INDEX)) {
+    let idx = lower.indexOf(name);
+    if (idx !== -1) withIndex.push({ name, idx });
+  }
+  withIndex.sort((a, b) => a.idx - b.idx);
+  return withIndex.map(({ name }) => name);
+};
+const applyWeekdayDueDateFromInput = (item, rawInput, itemIndex, weekdaysInInput) => {
+  const list = weekdaysInInput && weekdaysInInput.length > 0 ? weekdaysInInput : getWeekdaysFromInput(rawInput);
+  const name = list.length > 0 ? list[Math.min(itemIndex, list.length - 1)] : null;
+  if (!name) return item;
+  const date = getDateForWeekday(name);
+  return date ? { ...item, dueDate: date } : item;
+};
+const applyDefaultDueDate = (item) => {
+  if (item.dueDate) return item;
+  const today = toLocalDateString();
+  if (item.type === 'idea') {
+    return { ...item, dueDate: getEndOfMonth() };
+  }
+  if (item.category === 'work') {
+    return { ...item, dueDate: today };
+  }
+  return { ...item, dueDate: getEndOfWeek() };
+};
+
+// Style functions (getCategoryStyle takes customCategories as second arg)
+const getCategoryStyle = (category, customCategories) => {
+  const work = { hex: '#4B4F73', emoji: '💼' };
+  const personal = { hex: '#4F7C59', emoji: '🏠' };
+  const project = { hex: '#C65D3B', emoji: '🚀' };
+  const map = { work, personal, project };
+  let data = map[category];
+  if (!data) {
+    const i = customCategories.findIndex(c => c.name === category);
+    const customEmoji = i >= 0 ? (customCategories[i].emoji || '📌') : '📌';
+    data = { ...CUSTOM_CATEGORY_COLORS[i >= 0 ? i % CUSTOM_CATEGORY_COLORS.length : 0], emoji: customEmoji };
+  }
+  const hex = data.hex;
+  return {
+    bg: hexToRgba(hex, 0.18),
+    border: hex,
+    text: hex,
+    badgeBg: hexToRgba(hex, 0.22),
+    badgeText: hex,
+    emoji: data.emoji
+  };
+};
+const getPriorityStyle = (priority) => {
+  const high = { bg: '#C65D3B', text: '#C65D3B' };
+  const medium = { bg: '#3F6C7A', text: '#3F6C7A' };
+  const low = { bg: '#5E6B73', text: '#5E6B73' };
+  const map = { high, medium, low };
+  const d = map[priority] || low;
+  return { badgeBg: hexToRgba(d.bg, 0.22), badgeText: d.text };
+};
+const getCardBackground = (item) => {
+  if (item.completed) return 'rgba(79,124,89,0.06)';
+  const now = Date.now();
+  const todayStr = toLocalDateString();
+  if (item.dueDate && item.dueDate < todayStr) return 'rgba(198,93,59,0.08)';
+  if (item.dueDate && item.dueDate === todayStr) return 'rgba(194,168,62,0.08)';
+  if (item.createdAt) {
+    const created = new Date(item.createdAt).getTime();
+    if (now - created < NEW_TASK_MINUTES * 60 * 1000) return 'rgba(79,124,89,0.08)';
+  }
+  return '#FFFBF7';
+};
+
+const fireConfetti = (sourceEl) => {
+  if (!sourceEl || !sourceEl.getBoundingClientRect) return;
+  const rect = sourceEl.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:9999';
+  document.body.appendChild(container);
+  const count = 30;
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement('div');
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
+    const dist = 60 + Math.random() * 80;
+    const dx = Math.cos(angle) * dist;
+    const dy = -Math.abs(Math.sin(angle)) * dist - 20;
+    el.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:8px;height:8px;border-radius:2px;background:${CONFETTI_COLORS[i % CONFETTI_COLORS.length]};--cf-dx:${dx}px;--cf-dy:${dy}px;animation:confetti-fly 0.8s ease-out forwards`;
+    container.appendChild(el);
+  }
+  setTimeout(() => container.remove(), 800);
+};
+
+// Error Boundary
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error('React Error Boundary:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return React.createElement('div', { className: 'min-h-screen flex items-center justify-center p-8 text-center' },
+        React.createElement('div', null,
+          React.createElement('h2', { className: 'text-xl font-bold text-[#2D2A26] mb-2' }, 'Something went wrong'),
+          React.createElement('p', { className: 'text-[#6B6560] mb-4' }, this.state.error?.message),
+          React.createElement('button', {
+            onClick: () => this.setState({ hasError: false, error: null }),
+            className: 'px-4 py-2 bg-[#4F7C59] text-white rounded-xl'
+          }, 'Try Again')
+        )
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Contexts
+const DataContext = React.createContext();
+const useDataContext = () => React.useContext(DataContext);
+const DragContext = React.createContext();
+const useDragContext = () => React.useContext(DragContext);
 
 const VoiceTaskManager = () => {
   const [items, setItems] = useState([]);
@@ -125,14 +288,6 @@ const VoiceTaskManager = () => {
   const [statsPeriod, setStatsPeriod] = useState('week');
   const recognitionRef = useRef(null);
   const suppressGroupToggleRef = useRef(false);
-
-  const defaultCategories = ['work', 'personal', 'project'];
-  const toLocalDateString = (date = new Date()) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
 
   // Load items, learning data, and custom categories on mount
   useEffect(() => {
@@ -233,7 +388,10 @@ const VoiceTaskManager = () => {
     }
   };
 
-  const allCategories = [...defaultCategories, ...customCategories.map(c => c.name)];
+  const allCategories = useMemo(() =>
+    [...DEFAULT_CATEGORIES, ...customCategories.map(c => c.name)],
+    [customCategories]
+  );
 
   // Initialize speech recognition
   useEffect(() => {
@@ -298,67 +456,6 @@ const VoiceTaskManager = () => {
         setError(msg);
       }
     }
-  };
-
-  const getEndOfWeek = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = day === 0 ? 0 : 7 - day; // Sunday = end of week
-    d.setDate(d.getDate() + diff);
-    return toLocalDateString(d);
-  };
-
-  const getEndOfMonth = () => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 1, 0); // last day of current month
-    return toLocalDateString(d);
-  };
-
-  // Weekday name (lowercase) -> getDay() index (0=Sun .. 6=Sat)
-  const WEEKDAY_INDEX = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
-
-  const getDateForWeekday = (weekdayName) => {
-    const targetDay = WEEKDAY_INDEX[weekdayName];
-    if (targetDay === undefined) return null;
-    const today = new Date();
-    const currentDay = today.getDay();
-    let daysAhead = targetDay - currentDay;
-    if (daysAhead < 0) daysAhead += 7;
-    const d = new Date(today);
-    d.setDate(d.getDate() + daysAhead);
-    return toLocalDateString(d);
-  };
-
-  const getWeekdaysFromInput = (rawInput) => {
-    if (!rawInput || typeof rawInput !== 'string') return [];
-    const lower = rawInput.toLowerCase();
-    const withIndex = [];
-    for (const name of Object.keys(WEEKDAY_INDEX)) {
-      let idx = lower.indexOf(name);
-      if (idx !== -1) withIndex.push({ name, idx });
-    }
-    withIndex.sort((a, b) => a.idx - b.idx);
-    return withIndex.map(({ name }) => name);
-  };
-
-  const applyWeekdayDueDateFromInput = (item, rawInput, itemIndex, weekdaysInInput) => {
-    const list = weekdaysInInput && weekdaysInInput.length > 0 ? weekdaysInInput : getWeekdaysFromInput(rawInput);
-    const name = list.length > 0 ? list[Math.min(itemIndex, list.length - 1)] : null;
-    if (!name) return item;
-    const date = getDateForWeekday(name);
-    return date ? { ...item, dueDate: date } : item;
-  };
-
-  const applyDefaultDueDate = (item) => {
-    if (item.dueDate) return item;
-    const today = toLocalDateString();
-    if (item.type === 'idea') {
-      return { ...item, dueDate: getEndOfMonth() };
-    }
-    if (item.category === 'work') {
-      return { ...item, dueDate: today };
-    }
-    return { ...item, dueDate: getEndOfWeek() };
   };
 
   const categorizeWithClaude = async (text) => {
@@ -482,28 +579,6 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     } catch (err) {
       setError('Failed to save items');
     }
-  };
-
-  const CONFETTI_COLORS = ['#C65D3B', '#C2A83E', '#4F7C59', '#9E5B8C', '#3F6C7A', '#E6D8C3'];
-  const fireConfetti = (sourceEl) => {
-    if (!sourceEl || !sourceEl.getBoundingClientRect) return;
-    const rect = sourceEl.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const container = document.createElement('div');
-    container.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:9999';
-    document.body.appendChild(container);
-    const count = 30;
-    for (let i = 0; i < count; i++) {
-      const el = document.createElement('div');
-      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
-      const dist = 60 + Math.random() * 80;
-      const dx = Math.cos(angle) * dist;
-      const dy = -Math.abs(Math.sin(angle)) * dist - 20;
-      el.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:8px;height:8px;border-radius:2px;background:${CONFETTI_COLORS[i % CONFETTI_COLORS.length]};--cf-dx:${dx}px;--cf-dy:${dy}px;animation:confetti-fly 0.8s ease-out forwards`;
-      container.appendChild(el);
-    }
-    setTimeout(() => container.remove(), 800);
   };
 
   const toggleComplete = async (id, e) => {
@@ -659,60 +734,51 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     setIsCustomDateDragOver(false);
   };
 
-  const matchesPeriod = (item) => {
+  const matchesPeriod = useCallback((item) => {
     if (statsPeriod === 'all' || statsPeriod === 'hide') return true;
     if (!item.dueDate) return false;
-
     const now = new Date();
     const todayStr = toLocalDateString(now);
-
-    if (statsPeriod === 'today') {
-      return item.dueDate === todayStr;
-    } else if (statsPeriod === 'week') {
+    if (statsPeriod === 'today') return item.dueDate === todayStr;
+    if (statsPeriod === 'week') {
       const dayOfWeek = now.getDay();
       const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
-      const startStr = toLocalDateString(weekStart);
-      const endStr = toLocalDateString(weekEnd);
-      return item.dueDate >= startStr && item.dueDate <= endStr;
-    } else if (statsPeriod === 'month') {
-      const monthPrefix = todayStr.substring(0, 7);
-      return item.dueDate.startsWith(monthPrefix);
+      return item.dueDate >= toLocalDateString(weekStart) && item.dueDate <= toLocalDateString(weekEnd);
     }
+    if (statsPeriod === 'month') return item.dueDate.startsWith(todayStr.substring(0, 7));
     return true;
-  };
+  }, [statsPeriod]);
 
-  const sortedItems = [...items].sort((a, b) => {
+  const sortedItems = useMemo(() => [...items].sort((a, b) => {
     if (!a.dueDate && !b.dueDate) return new Date(b.createdAt) - new Date(a.createdAt);
     if (!a.dueDate) return 1;
     if (!b.dueDate) return -1;
     return new Date(a.dueDate) - new Date(b.dueDate);
-  });
+  }), [items]);
 
-  const filteredItems = sortedItems.filter(item => {
+  const filteredItems = useMemo(() => sortedItems.filter(item => {
     if (filter !== 'all' && item.type !== filter) return false;
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
     if (!showCompleted && item.completed) return false;
     if (!matchesPeriod(item)) return false;
     return true;
-  });
+  }), [sortedItems, filter, categoryFilter, showCompleted, matchesPeriod]);
 
-  const todayStr = toLocalDateString();
-
-  const getGroupLabel = (dateStr) => {
-    if (dateStr === 'overdue') return 'Overdue';
-    if (!dateStr) return 'No Date';
-    if (dateStr === todayStr) return 'Today';
-    const tomorrow = new Date(`${todayStr}T12:00:00`);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = toLocalDateString(tomorrow);
-    if (dateStr === tomorrowStr) return 'Tomorrow';
-    const d = new Date(dateStr + 'T12:00:00');
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  };
-
-  const groupedItems = (() => {
+  const groupedItems = useMemo(() => {
+    const todayStr = toLocalDateString();
+    const getGroupLabel = (dateStr) => {
+      if (dateStr === 'overdue') return 'Overdue';
+      if (!dateStr) return 'No Date';
+      if (dateStr === todayStr) return 'Today';
+      const tomorrow = new Date(`${todayStr}T12:00:00`);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = toLocalDateString(tomorrow);
+      if (dateStr === tomorrowStr) return 'Tomorrow';
+      const d = new Date(dateStr + 'T12:00:00');
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    };
     const overdue = [];
     const byDate = new Map();
     let noDate = [];
@@ -740,20 +806,18 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
       groups.push({ key: 'no-date', dueDate: null, label: 'No Date', isToday: false, isOverdue: false, items: sorted });
     }
     return groups;
-  })();
+  }, [filteredItems]);
 
-  const stats = (() => {
+  const stats = useMemo(() => {
     if (statsPeriod === 'hide') return { total: 0, tasks: 0, ideas: 0, completed: 0 };
-
     const filtered = items.filter(matchesPeriod);
-
     return {
       total: filtered.length,
       tasks: filtered.filter(i => i.type === 'task').length,
       ideas: filtered.filter(i => i.type === 'idea').length,
       completed: filtered.filter(i => i.completed).length
     };
-  })();
+  }, [items, statsPeriod, matchesPeriod]);
 
   const toggleGroup = (key) => {
     setCollapsedGroups(prev => {
@@ -785,7 +849,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     let newDueDate;
     if (groupKey === 'no-date') newDueDate = null;
     else if (groupKey === 'overdue') {
-      const yesterday = new Date(`${todayStr}T12:00:00`);
+      const yesterday = new Date(`${toLocalDateString()}T12:00:00`);
       yesterday.setDate(yesterday.getDate() - 1);
       newDueDate = toLocalDateString(yesterday);
     } else newDueDate = groupKey;
@@ -846,63 +910,21 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     setDraggedItem(null);
   };
 
-  // Earthy palette (light background): bg tint, left border, badge tint, text, emoji
-  const hexToRgba = (hex, alpha) => {
-    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-    return `rgba(${r},${g},${b},${alpha})`;
-  };
-  const getCategoryStyle = (category) => {
-    const work = { hex: '#4B4F73', emoji: '💼' };      // Storm Indigo
-    const personal = { hex: '#4F7C59', emoji: '🏠' }; // Fern Green
-    const project = { hex: '#C65D3B', emoji: '🚀' };  // Terracotta
-    const customCycle = [
-      { hex: '#9E5B8C', emoji: '📌' },  // Muted Berry
-      { hex: '#3F6C7A', emoji: '📌' },  // Lake Blue
-      { hex: '#C2A83E', emoji: '📌' },  // Golden Moss
-      { hex: '#5E6B73', emoji: '📌' }   // River Slate
-    ];
-    const map = { work, personal, project };
-    let data = map[category];
-    if (!data) {
-      const i = customCategories.findIndex(c => c.name === category);
-      const customEmoji = i >= 0 ? (customCategories[i].emoji || '📌') : '📌';
-      data = { ...customCycle[i >= 0 ? i % customCycle.length : 0], emoji: customEmoji };
-    }
-    const hex = data.hex;
-    return {
-      bg: hexToRgba(hex, 0.18),
-      border: hex,
-      text: hex,
-      badgeBg: hexToRgba(hex, 0.22),
-      badgeText: hex,
-      emoji: data.emoji
-    };
-  };
-  const getPriorityStyle = (priority) => {
-    const high = { bg: '#C65D3B', text: '#C65D3B' };   // Terracotta
-    const medium = { bg: '#3F6C7A', text: '#3F6C7A' };  // Lake Blue
-    const low = { bg: '#5E6B73', text: '#5E6B73' };     // River Slate
-    const map = { high, medium, low };
-    const d = map[priority] || low;
-    return { badgeBg: hexToRgba(d.bg, 0.22), badgeText: d.text };
-  };
+  const dataContextValue = useMemo(() => ({
+    items, setItems, customCategories, setCustomCategories,
+    learningData, setLearningData, allCategories
+  }), [items, customCategories, learningData, allCategories]);
 
-  // Conditional card background: pale green (new), pale red (overdue), pale yellow (today), else cream
-  const NEW_TASK_MINUTES = 5;
-  const getCardBackground = (item) => {
-    if (item.completed) return 'rgba(79,124,89,0.06)'; // subtle fern
-    const now = Date.now();
-    const todayStr = toLocalDateString();
-    if (item.dueDate && item.dueDate < todayStr) return 'rgba(198,93,59,0.08)';   // pale terracotta (overdue)
-    if (item.dueDate && item.dueDate === todayStr) return 'rgba(194,168,62,0.08)'; // pale golden moss (today)
-    if (item.createdAt) {
-      const created = new Date(item.createdAt).getTime();
-      if (now - created < NEW_TASK_MINUTES * 60 * 1000) return 'rgba(79,124,89,0.08)'; // pale fern (new)
-    }
-    return '#FFFBF7'; // cream
-  };
+  const dragContextValue = useMemo(() => ({
+    draggedItem, setDraggedItem, dragOverGroupKey, setDragOverGroupKey,
+    customDropDate, setCustomDropDate, isCustomDateDragOver, setIsCustomDateDragOver,
+    suppressGroupToggleRef
+  }), [draggedItem, dragOverGroupKey, customDropDate, isCustomDateDragOver]);
 
   return (
+    <ErrorBoundary>
+      <DataContext.Provider value={dataContextValue}>
+        <DragContext.Provider value={dragContextValue}>
     <div className="min-h-screen p-4">
       <div className="max-w-4xl mx-auto">
         {/* Sticky header bar — light frosted glass */}
@@ -969,8 +991,8 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">Default Categories</label>
               <div className="flex flex-wrap gap-2">
-                {defaultCategories.map(cat => {
-                  const s = getCategoryStyle(cat);
+                {DEFAULT_CATEGORIES.map(cat => {
+                  const s = getCategoryStyle(cat, customCategories);
                   return (
                     <span key={cat} className="px-3 py-1 rounded-full text-sm font-medium" style={{ backgroundColor: s.badgeBg, color: s.badgeText }}>
                       {s.emoji} {cat}
@@ -1009,7 +1031,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
               <div className="flex flex-wrap gap-2">
                 {customCategories.map(cat => {
                   const isEditing = editingCategory && editingCategory.oldName === cat.name;
-                  const s = getCategoryStyle(cat.name);
+                  const s = getCategoryStyle(cat.name, customCategories);
                   if (isEditing) {
                     const draft = editingCategory;
                     return (
@@ -1093,7 +1115,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
             All Categories
           </button>
           {allCategories.map(cat => {
-            const s = getCategoryStyle(cat);
+            const s = getCategoryStyle(cat, customCategories);
             const active = categoryFilter === cat;
             return (
               <button
@@ -1190,7 +1212,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                   {!collapsed && (
                     <div className="space-y-3 mt-3">
                       {group.items.map(item => {
-                const catStyle = getCategoryStyle(item.category);
+                const catStyle = getCategoryStyle(item.category, customCategories);
                 const isDragging = draggedItem?.id === item.id;
                 return (
                 <div
@@ -1376,6 +1398,9 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
         )}
       </div>
     </div>
+        </DragContext.Provider>
+      </DataContext.Provider>
+    </ErrorBoundary>
   );
 };
 
