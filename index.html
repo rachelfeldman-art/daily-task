@@ -122,6 +122,7 @@ const VoiceTaskManager = () => {
   const [dragOverGroupKey, setDragOverGroupKey] = useState(null);
   const [customDropDate, setCustomDropDate] = useState('');
   const [isCustomDateDragOver, setIsCustomDateDragOver] = useState(false);
+  const [statsPeriod, setStatsPeriod] = useState('week');
   const recognitionRef = useRef(null);
   const suppressGroupToggleRef = useRef(false);
 
@@ -252,17 +253,14 @@ const VoiceTaskManager = () => {
       recognitionRef.current.onerror = (event) => {
         setIsListening(false);
         if (event.error === 'not-allowed') {
-          setError('Microphone blocked in artifact. Use text input instead.');
+          setError('Microphone access denied. Allow mic in browser or device settings and try again.');
         } else if (event.error === 'no-speech') {
           setError('No speech detected. Try again.');
+        } else if (event.error === 'network') {
+          setError('Voice needs internet on this device. Check connection and try again.');
         } else {
-          console.log('SpeechRecognition onerror:', {
-            error: event.error,
-            message: event.message,
-            type: typeof event.error,
-            eventKeys: Object.keys(event)
-          });
-          setError(`Voice unavailable in sandbox. Use text input.`);
+          console.log('SpeechRecognition onerror:', event.error, event.message);
+          setError(event.message || 'Voice unavailable on this device. Use text input.');
         }
       };
 
@@ -274,7 +272,7 @@ const VoiceTaskManager = () => {
 
   const toggleListening = async () => {
     if (!recognitionRef.current) {
-      setError('Voice not supported in artifact sandbox. Use text input.');
+      setError('Voice input isn’t supported in this browser. Use text input instead.');
       return;
     }
 
@@ -282,6 +280,10 @@ const VoiceTaskManager = () => {
       recognitionRef.current.stop();
       setIsListening(false);
     } else {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Microphone access requires a secure page (HTTPS). Use text input.');
+        return;
+      }
       console.log('Voice: requesting mic and starting recognition...');
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -290,7 +292,10 @@ const VoiceTaskManager = () => {
         setIsListening(true);
       } catch (err) {
         console.log('getUserMedia / start error:', err?.name, err?.message, err);
-        setError('Voice unavailable in artifact. Use text input instead.');
+        const msg = err?.name === 'NotAllowedError' || err?.message?.includes('Permission')
+          ? 'Microphone permission denied. Allow mic in browser settings and try again.'
+          : err?.message || 'Voice unavailable. Use text input instead.';
+        setError(msg);
       }
     }
   };
@@ -307,6 +312,41 @@ const VoiceTaskManager = () => {
     const d = new Date();
     d.setMonth(d.getMonth() + 1, 0); // last day of current month
     return toLocalDateString(d);
+  };
+
+  // Weekday name (lowercase) -> getDay() index (0=Sun .. 6=Sat)
+  const WEEKDAY_INDEX = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+
+  const getDateForWeekday = (weekdayName) => {
+    const targetDay = WEEKDAY_INDEX[weekdayName];
+    if (targetDay === undefined) return null;
+    const today = new Date();
+    const currentDay = today.getDay();
+    let daysAhead = targetDay - currentDay;
+    if (daysAhead < 0) daysAhead += 7;
+    const d = new Date(today);
+    d.setDate(d.getDate() + daysAhead);
+    return toLocalDateString(d);
+  };
+
+  const getWeekdaysFromInput = (rawInput) => {
+    if (!rawInput || typeof rawInput !== 'string') return [];
+    const lower = rawInput.toLowerCase();
+    const withIndex = [];
+    for (const name of Object.keys(WEEKDAY_INDEX)) {
+      let idx = lower.indexOf(name);
+      if (idx !== -1) withIndex.push({ name, idx });
+    }
+    withIndex.sort((a, b) => a.idx - b.idx);
+    return withIndex.map(({ name }) => name);
+  };
+
+  const applyWeekdayDueDateFromInput = (item, rawInput, itemIndex, weekdaysInInput) => {
+    const list = weekdaysInInput && weekdaysInInput.length > 0 ? weekdaysInInput : getWeekdaysFromInput(rawInput);
+    const name = list.length > 0 ? list[Math.min(itemIndex, list.length - 1)] : null;
+    if (!name) return item;
+    const date = getDateForWeekday(name);
+    return date ? { ...item, dueDate: date } : item;
   };
 
   const applyDefaultDueDate = (item) => {
@@ -357,8 +397,9 @@ For EACH separate task or idea, create an object with:
 
 Rules:
 - Separate multiple items if the input contains "and", commas, semicolons, or line breaks suggesting multiple tasks
-- Extract due dates from phrases like "by Friday", "tomorrow", "next week", "end of month"
 - Today is ${toLocalDateString()}
+- Extract due dates from phrases like "by Friday", "tomorrow", "on Wednesday", "next week", "end of month"
+- For weekday names (e.g. "Wednesday", "on Wednesday", "by Friday"): use that weekday's date. If that weekday is today or still to come this week, use it; otherwise use that weekday next week. Example: if today is Tuesday, "Wednesday" or "on Wednesday" means tomorrow (the Wednesday of this week)—return that date as YYYY-MM-DD. Never use the day after the mentioned weekday.
 - type: "task" if actionable, "idea" if conceptual
 - category: choose the most appropriate from available categories
 - priority: high if urgent/time-sensitive, medium if standard, low if someday/maybe
@@ -395,7 +436,10 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
       }
       const content = data.content[0].text.trim();
       const cleaned = content.replace(/```json|```/g, '').trim();
-      return JSON.parse(cleaned).map(applyDefaultDueDate);
+      const weekdaysInInput = getWeekdaysFromInput(text);
+      return JSON.parse(cleaned)
+        .map((item, idx) => applyWeekdayDueDateFromInput(item, text, idx, weekdaysInInput))
+        .map(applyDefaultDueDate);
     } catch (err) {
       console.error('Categorization error:', err);
       return [{
@@ -404,7 +448,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
         category: 'personal',
         priority: 'medium',
         dueDate: null
-      }].map(applyDefaultDueDate);
+      }].map((item, idx) => applyWeekdayDueDateFromInput(item, text, idx, getWeekdaysFromInput(text))).map(applyDefaultDueDate);
     } finally {
       setLoading(false);
     }
@@ -554,15 +598,17 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
   };
 
   const handleDragStart = (e, item) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', item.id.toString());
     setDraggedItem(item);
     setCustomDropDate(item.dueDate || toLocalDateString());
-    e.dataTransfer.effectAllowed = 'move';
   };
 
   const handleDragOver = (e, targetItem) => {
     e.preventDefault();
     if (!draggedItem || draggedItem.id === targetItem.id) return;
-    if (draggedItem.dueDate !== targetItem.dueDate) return;
+    // Fix: normalize null/undefined for proper comparison
+    if ((draggedItem.dueDate || null) !== (targetItem.dueDate || null)) return;
 
     const sameDueDateItems = items
       .filter(i => (i.dueDate || null) === (targetItem.dueDate || null))
@@ -586,17 +632,51 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     });
 
     setItems(newItems);
-    fetch(`${API_BASE}/api/items`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newItems)
-    }).catch(err => console.log('Failed to save reorder:', err));
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    if (!draggedItem) return;
+    // Save the reordered group to the server (only on drop, not on every dragover)
+    const groupItems = items
+      .filter(i => (i.dueDate || null) === (draggedItem.dueDate || null));
+    if (groupItems.length > 0) {
+      fetch(`${API_BASE}/api/items`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(groupItems)
+      }).catch(err => console.log('Failed to save reorder:', err));
+    }
   };
 
   const handleDragEnd = () => {
     setDraggedItem(null);
     setDragOverGroupKey(null);
     setIsCustomDateDragOver(false);
+  };
+
+  const matchesPeriod = (item) => {
+    if (statsPeriod === 'all' || statsPeriod === 'hide') return true;
+    if (!item.dueDate) return false;
+
+    const now = new Date();
+    const todayStr = toLocalDateString(now);
+
+    if (statsPeriod === 'today') {
+      return item.dueDate === todayStr;
+    } else if (statsPeriod === 'week') {
+      const dayOfWeek = now.getDay();
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const startStr = toLocalDateString(weekStart);
+      const endStr = toLocalDateString(weekEnd);
+      return item.dueDate >= startStr && item.dueDate <= endStr;
+    } else if (statsPeriod === 'month') {
+      const monthPrefix = todayStr.substring(0, 7);
+      return item.dueDate.startsWith(monthPrefix);
+    }
+    return true;
   };
 
   const sortedItems = [...items].sort((a, b) => {
@@ -610,6 +690,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     if (filter !== 'all' && item.type !== filter) return false;
     if (categoryFilter !== 'all' && item.category !== categoryFilter) return false;
     if (!showCompleted && item.completed) return false;
+    if (!matchesPeriod(item)) return false;
     return true;
   });
 
@@ -657,12 +738,18 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     return groups;
   })();
 
-  const stats = {
-    total: items.length,
-    tasks: items.filter(i => i.type === 'task').length,
-    ideas: items.filter(i => i.type === 'idea').length,
-    completed: items.filter(i => i.completed).length
-  };
+  const stats = (() => {
+    if (statsPeriod === 'hide') return { total: 0, tasks: 0, ideas: 0, completed: 0 };
+
+    const filtered = items.filter(matchesPeriod);
+
+    return {
+      total: filtered.length,
+      tasks: filtered.filter(i => i.type === 'task').length,
+      ideas: filtered.filter(i => i.type === 'idea').length,
+      completed: filtered.filter(i => i.completed).length
+    };
+  })();
 
   const toggleGroup = (key) => {
     setCollapsedGroups(prev => {
@@ -830,17 +917,43 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
               <div id="clerk-user-button"></div>
             </div>
           </div>
-          {/* Earthy stat pills */}
-          <div className="flex flex-wrap gap-2 mt-3">
-            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' }}>
-              📋 {stats.tasks} tasks
-            </span>
-            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' }}>
-              💡 {stats.ideas} ideas
-            </span>
-            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(79,124,89,0.22)', color: '#4F7C59' }}>
-              ✅ {stats.completed} done
-            </span>
+          {/* Stats period toggle + stat pills */}
+          <div className="mt-3">
+            <div className="flex items-center gap-1 mb-2">
+              {[
+                { key: 'today', label: 'Today' },
+                { key: 'week', label: 'This Week' },
+                { key: 'month', label: 'This Month' },
+                { key: 'all', label: 'All Time' },
+                { key: 'hide', label: 'Hide' },
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => setStatsPeriod(opt.key)}
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                    statsPeriod === opt.key
+                      ? 'text-white'
+                      : 'text-[#6B6560] hover:bg-[#E6D8C3]/40'
+                  }`}
+                  style={statsPeriod === opt.key ? { backgroundColor: '#8B7E6A' } : {}}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {statsPeriod !== 'hide' && (
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' }}>
+                  📋 {stats.tasks} tasks
+                </span>
+                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' }}>
+                  💡 {stats.ideas} ideas
+                </span>
+                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(79,124,89,0.22)', color: '#4F7C59' }}>
+                  ✅ {stats.completed} done
+                </span>
+              </div>
+            )}
           </div>
         </header>
 
@@ -965,8 +1078,33 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           <p className="text-[#6B6560] text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and give Dahlia treats"</p>
         </div>
 
-        {/* Filters — inline earthy pills, no card wrapper */}
+        {/* Filters — inline earthy pills, no card wrapper: categories first, then type (tasks/ideas) */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
+          <button
+            onClick={() => setCategoryFilter('all')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+              categoryFilter === 'all' ? 'bg-[#4A4642] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+            }`}
+          >
+            All Categories
+          </button>
+          {allCategories.map(cat => {
+            const s = getCategoryStyle(cat);
+            const active = categoryFilter === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className="px-4 py-2 rounded-full text-sm font-medium transition-all border border-transparent hover:opacity-90"
+                style={active ? { backgroundColor: s.border, color: 'white' } : { backgroundColor: s.badgeBg, color: s.badgeText, borderColor: 'transparent' }}
+              >
+                {s.emoji} {cat}
+              </button>
+            );
+          })}
+
+          <span className="w-full basis-full h-0 block" aria-hidden />
+
           <button
             onClick={() => setFilter('all')}
             className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
@@ -991,31 +1129,6 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           >
             💡 Ideas
           </button>
-
-          <span className="w-px h-6 bg-[#E6D8C3] mx-1" aria-hidden />
-
-          <button
-            onClick={() => setCategoryFilter('all')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-              categoryFilter === 'all' ? 'bg-[#4A4642] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
-            }`}
-          >
-            All Categories
-          </button>
-          {allCategories.map(cat => {
-            const s = getCategoryStyle(cat);
-            const active = categoryFilter === cat;
-            return (
-              <button
-                key={cat}
-                onClick={() => setCategoryFilter(cat)}
-                className="px-4 py-2 rounded-full text-sm font-medium transition-all border border-transparent hover:opacity-90"
-                style={active ? { backgroundColor: s.border, color: 'white' } : { backgroundColor: s.badgeBg, color: s.badgeText, borderColor: 'transparent' }}
-              >
-                {s.emoji} {cat}
-              </button>
-            );
-          })}
         </div>
 
         {/* List View — date-grouped task cards */}
@@ -1081,8 +1194,9 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
                   draggable={editingId !== item.id}
                   onDragStart={(e) => handleDragStart(e, item)}
                   onDragOver={(e) => handleDragOver(e, item)}
+                  onDrop={handleDrop}
                   onDragEnd={handleDragEnd}
-                  className={`rounded-2xl border-l-4 transition-all duration-200 ${
+                  className={`rounded-2xl border-l-8 transition-all duration-200 ${
                     item.completed ? 'opacity-60' : ''
                   } ${isDragging ? 'opacity-50 scale-95 rotate-1' : 'hover:scale-[1.02]'}`}
                   style={{
