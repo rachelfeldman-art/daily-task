@@ -600,8 +600,12 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
   const handleDragStart = (e, item) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', item.id.toString());
-    setDraggedItem(item);
-    setCustomDropDate(item.dueDate || toLocalDateString());
+    // Delay state update so the browser captures the drag image
+    // before React re-renders with isDragging styles (opacity/scale/rotate)
+    setTimeout(() => {
+      setDraggedItem(item);
+      setCustomDropDate(item.dueDate || toLocalDateString());
+    }, 0);
   };
 
   const handleDragOver = (e, targetItem) => {
