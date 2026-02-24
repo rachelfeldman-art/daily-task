@@ -261,6 +261,137 @@ const useDataContext = () => React.useContext(DataContext);
 const DragContext = React.createContext();
 const useDragContext = () => React.useContext(DragContext);
 
+// ─── Phase 2: Simple display components (React.memo) ───
+const Header = React.memo(function Header({ statsPeriod, setStatsPeriod, stats, showCategoryManager, setShowCategoryManager }) {
+  return (
+    <header className="sticky top-0 z-20 -mx-4 px-4 pt-4 pb-3 mb-4 rounded-2xl backdrop-blur-md bg-[#FFFBF7]/85 border border-[#E6D8C3]/60 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="header-title text-2xl font-normal text-[#2D2A26] flex items-center gap-2">
+          <span>🌿</span> My Tasks
+        </h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCategoryManager(!showCategoryManager)}
+            className="p-2 text-[#6B6560] hover:text-[#2D2A26] hover:bg-[#E6D8C3]/40 rounded-xl transition-colors"
+          >
+            <Settings size={22} />
+          </button>
+          <div id="clerk-user-button"></div>
+        </div>
+      </div>
+      <div className="mt-3">
+        <div className="flex items-center gap-1 mb-2">
+          {[
+            { key: 'today', label: 'Today' },
+            { key: 'week', label: 'This Week' },
+            { key: 'month', label: 'This Month' },
+            { key: 'all', label: 'All Time' },
+            { key: 'hide', label: 'Hide' },
+          ].map(opt => (
+            <button
+              key={opt.key}
+              onClick={() => setStatsPeriod(opt.key)}
+              className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                statsPeriod === opt.key
+                  ? 'text-white'
+                  : 'text-[#6B6560] hover:bg-[#E6D8C3]/40'
+              }`}
+              style={statsPeriod === opt.key ? { backgroundColor: '#8B7E6A' } : {}}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {statsPeriod !== 'hide' && (
+          <div className="flex flex-wrap gap-2">
+            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' }}>
+              📋 {stats.tasks} tasks
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' }}>
+              💡 {stats.ideas} ideas
+            </span>
+            <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(79,124,89,0.22)', color: '#4F7C59' }}>
+              ✅ {stats.completed} done
+            </span>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+});
+
+const FilterBar = React.memo(function FilterBar({ filter, setFilter, categoryFilter, setCategoryFilter }) {
+  const { allCategories, customCategories } = useDataContext();
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-6">
+      <button
+        onClick={() => setCategoryFilter('all')}
+        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+          categoryFilter === 'all' ? 'bg-[#4A4642] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+        }`}
+      >
+        All Categories
+      </button>
+      {allCategories.map(cat => {
+        const s = getCategoryStyle(cat, customCategories);
+        const active = categoryFilter === cat;
+        return (
+          <button
+            key={cat}
+            onClick={() => setCategoryFilter(cat)}
+            className="px-4 py-2 rounded-full text-sm font-medium transition-all border border-transparent hover:opacity-90"
+            style={active ? { backgroundColor: s.border, color: 'white' } : { backgroundColor: s.badgeBg, color: s.badgeText, borderColor: 'transparent' }}
+          >
+            {s.emoji} {cat}
+          </button>
+        );
+      })}
+
+      <span className="w-full basis-full h-0 block" aria-hidden />
+
+      <button
+        onClick={() => setFilter('all')}
+        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+          filter === 'all' ? 'bg-[#5E6B73] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+        }`}
+      >
+        All
+      </button>
+      <button
+        onClick={() => setFilter('task')}
+        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+          filter === 'task' ? 'bg-[#3F6C7A] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+        }`}
+      >
+        📋 Tasks
+      </button>
+      <button
+        onClick={() => setFilter('idea')}
+        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+          filter === 'idea' ? 'bg-[#C2A83E] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
+        }`}
+      >
+        💡 Ideas
+      </button>
+    </div>
+  );
+});
+
+const CompletedToggle = React.memo(function CompletedToggle({ showCompleted, setShowCompleted, completedCount }) {
+  return (
+    <div className="mt-6 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        onClick={() => setShowCompleted(!showCompleted)}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+      >
+        {showCompleted ? 'Hide completed' : 'Show completed'}
+        <span className="text-gray-500">({completedCount})</span>
+      </button>
+    </div>
+  );
+});
+
 const VoiceTaskManager = () => {
   const [items, setItems] = useState([]);
   const [isListening, setIsListening] = useState(false);
@@ -819,6 +950,8 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
     };
   }, [items, statsPeriod, matchesPeriod]);
 
+  const completedCount = useMemo(() => items.filter(i => i.completed).length, [items]);
+
   const toggleGroup = (key) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
@@ -927,61 +1060,13 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
         <DragContext.Provider value={dragContextValue}>
     <div className="min-h-screen p-4">
       <div className="max-w-4xl mx-auto">
-        {/* Sticky header bar — light frosted glass */}
-        <header className="sticky top-0 z-20 -mx-4 px-4 pt-4 pb-3 mb-4 rounded-2xl backdrop-blur-md bg-[#FFFBF7]/85 border border-[#E6D8C3]/60 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h1 className="header-title text-2xl font-normal text-[#2D2A26] flex items-center gap-2">
-              <span>🌿</span> My Tasks
-            </h1>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setShowCategoryManager(!showCategoryManager)}
-                className="p-2 text-[#6B6560] hover:text-[#2D2A26] hover:bg-[#E6D8C3]/40 rounded-xl transition-colors"
-              >
-                <Settings size={22} />
-              </button>
-              <div id="clerk-user-button"></div>
-            </div>
-          </div>
-          {/* Stats period toggle + stat pills */}
-          <div className="mt-3">
-            <div className="flex items-center gap-1 mb-2">
-              {[
-                { key: 'today', label: 'Today' },
-                { key: 'week', label: 'This Week' },
-                { key: 'month', label: 'This Month' },
-                { key: 'all', label: 'All Time' },
-                { key: 'hide', label: 'Hide' },
-              ].map(opt => (
-                <button
-                  key={opt.key}
-                  onClick={() => setStatsPeriod(opt.key)}
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                    statsPeriod === opt.key
-                      ? 'text-white'
-                      : 'text-[#6B6560] hover:bg-[#E6D8C3]/40'
-                  }`}
-                  style={statsPeriod === opt.key ? { backgroundColor: '#8B7E6A' } : {}}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {statsPeriod !== 'hide' && (
-              <div className="flex flex-wrap gap-2">
-                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(63,108,122,0.22)', color: '#3F6C7A' }}>
-                  📋 {stats.tasks} tasks
-                </span>
-                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(194,168,62,0.22)', color: '#C2A83E' }}>
-                  💡 {stats.ideas} ideas
-                </span>
-                <span className="px-3 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'rgba(79,124,89,0.22)', color: '#4F7C59' }}>
-                  ✅ {stats.completed} done
-                </span>
-              </div>
-            )}
-          </div>
-        </header>
+        <Header
+          statsPeriod={statsPeriod}
+          setStatsPeriod={setStatsPeriod}
+          stats={stats}
+          showCategoryManager={showCategoryManager}
+          setShowCategoryManager={setShowCategoryManager}
+        />
 
         {/* Category Manager */}
         {showCategoryManager && (
@@ -1101,61 +1186,14 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           </div>
           {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
           {loading && <p className="text-[#3F6C7A] text-sm mt-2">Parsing and categorizing...</p>}
-          <p className="text-[#6B6560] text-xs mt-2">💡 Try: "Email BKS about follow-up by Friday and give Dahlia treats"</p>
         </div>
 
-        {/* Filters — inline earthy pills, no card wrapper: categories first, then type (tasks/ideas) */}
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <button
-            onClick={() => setCategoryFilter('all')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-              categoryFilter === 'all' ? 'bg-[#4A4642] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
-            }`}
-          >
-            All Categories
-          </button>
-          {allCategories.map(cat => {
-            const s = getCategoryStyle(cat, customCategories);
-            const active = categoryFilter === cat;
-            return (
-              <button
-                key={cat}
-                onClick={() => setCategoryFilter(cat)}
-                className="px-4 py-2 rounded-full text-sm font-medium transition-all border border-transparent hover:opacity-90"
-                style={active ? { backgroundColor: s.border, color: 'white' } : { backgroundColor: s.badgeBg, color: s.badgeText, borderColor: 'transparent' }}
-              >
-                {s.emoji} {cat}
-              </button>
-            );
-          })}
-
-          <span className="w-full basis-full h-0 block" aria-hidden />
-
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-              filter === 'all' ? 'bg-[#5E6B73] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
-            }`}
-          >
-            All
-          </button>
-          <button
-            onClick={() => setFilter('task')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-              filter === 'task' ? 'bg-[#3F6C7A] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
-            }`}
-          >
-            📋 Tasks
-          </button>
-          <button
-            onClick={() => setFilter('idea')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-              filter === 'idea' ? 'bg-[#C2A83E] text-white shadow-sm' : 'bg-[#E6D8C3]/50 text-[#6B6560] hover:bg-[#E6D8C3] hover:text-[#2D2A26] border border-[#E6D8C3]'
-            }`}
-          >
-            💡 Ideas
-          </button>
-        </div>
+        <FilterBar
+          filter={filter}
+          setFilter={setFilter}
+          categoryFilter={categoryFilter}
+          setCategoryFilter={setCategoryFilter}
+        />
 
         {/* List View — date-grouped task cards */}
         <div className="space-y-6">
@@ -1383,18 +1421,12 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
           )}
         </div>
 
-        {/* Toggle to show/hide completed items */}
-        {items.some(i => i.completed) && (
-          <div className="mt-6 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowCompleted(!showCompleted)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-            >
-              {showCompleted ? 'Hide completed' : 'Show completed'}
-              <span className="text-gray-500">({items.filter(i => i.completed).length})</span>
-            </button>
-          </div>
+        {completedCount > 0 && (
+          <CompletedToggle
+            showCompleted={showCompleted}
+            setShowCompleted={setShowCompleted}
+            completedCount={completedCount}
+          />
         )}
       </div>
     </div>
