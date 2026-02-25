@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  --bg-canvas: #F5F0E8;
+  --bg-card: #FFFBF7;
+  --text-primary: #2D2A26;
+  --text-secondary: #6B6560;
+  --accent-terracotta: #C65D3B;
+  --accent-golden-moss: #C2A83E;
+  --accent-muted-berry: #9E5B8C;
+  --accent-fern: #4F7C59;
+  --accent-lake: #3F6C7A;
+  --accent-storm: #4B4F73;
+  --accent-slate: #5E6B73;
+  --tint-cloud-sand: #E6D8C3;
+}
+
+body {
+  font-family: 'Source Sans 3', sans-serif;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+}
+
+@keyframes confetti-fly {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--cf-dx), var(--cf-dy)) scale(0); opacity: 0; }
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(158, 91, 140, 0.5); }
+  50% { box-shadow: 0 0 0 12px rgba(158, 91, 140, 0); }
+}
+
+@keyframes checkbox-pop {
+  0% { transform: scale(0.8); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+.input-focus-glow:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(63,108,122,0.4);
+}
+
+.mic-pulse-anim {
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+.checkbox-pop-anim {
+  animation: checkbox-pop 0.3s ease-out;
+}
+
+.priority-dot-pulse {
+  animation: priority-dot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes priority-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.15); }
+}
+
+.header-title {
+  font-family: 'Cedarville Cursive', cursive;
+}

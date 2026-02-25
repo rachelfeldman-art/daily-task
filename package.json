@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "vite",
+    "dev:server": "node server.js",
+    "build": "vite build",
     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "db:generate": "drizzle-kit generate",
@@ -17,6 +20,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.1",
     "@clerk/express": "^1.7.70",
     "@neondatabase/serverless": "^1.0.2",
     "cors": "^2.8.6",
@@ -24,9 +28,15 @@
     "drizzle-orm": "^0.45.1",
     "express": "^5.2.1",
     "pg": "^8.18.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.8"
+    "@tailwindcss/vite": "^4.2.1",
+    "@vitejs/plugin-react": "^5.1.4",
+    "drizzle-kit": "^0.31.8",
+    "tailwindcss": "^4.2.1",
+    "vite": "^7.3.1"
   }
 }

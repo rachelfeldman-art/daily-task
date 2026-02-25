@@ -12,7 +12,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(clerkMiddleware());
-app.use(express.static(path.join(__dirname)));
+// Serve built frontend from dist/ (after npm run build)
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // Protect all API routes - require authentication
 app.use('/api', requireAuth());
@@ -27,6 +28,29 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+// Prevent unhandled pool errors (e.g. Neon closing idle connections) from crashing the process
+pool.on('error', (err) => {
+  console.error('Unexpected pool error (connection dropped?):', err.message);
+});
+
+// Run a DB callback with one retry on connection-related errors (Neon can drop idle connections)
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const isConnectionError = err.code === 'ECONNRESET' || err.code === 'EPIPE' || err.message?.includes('Connection terminated');
+    if (isConnectionError) {
+      try {
+        return await fn();
+      } catch (retryErr) {
+        console.error('Retry failed:', retryErr.message);
+        throw retryErr;
+      }
+    }
+    throw err;
+  }
+}
 
 // ─── Validation Schemas ───
 
@@ -62,12 +86,12 @@ const learningDataSchema = z.object({
 });
 
 const customCategorySchema = z.object({
-  name: z.string().min(1).max(100).toLowerCase(),
+  name: z.string().min(1).max(100),
   emoji: z.string().min(1).max(10).optional().default('📌')
 });
 
 const customCategoryUpdateSchema = z.object({
-  name: z.string().min(1).max(100).toLowerCase().optional(),
+  name: z.string().min(1).max(100).optional(),
   emoji: z.string().min(1).max(10).optional()
 }).refine(data => data.name !== undefined || data.emoji !== undefined, {
   message: 'At least one of name or emoji must be provided'
@@ -96,7 +120,7 @@ const validate = (schema, source = 'body') => {
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: 'Validation failed',
-          details: error.errors.map(err => ({
+          details: (error.issues || []).map(err => ({
             field: err.path.join('.'),
             message: err.message
           }))
@@ -141,6 +165,7 @@ async function initDB() {
 
       -- Add user_id column to all tables (idempotent)
       ALTER TABLE items ADD COLUMN IF NOT EXISTS user_id TEXT;
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
       ALTER TABLE learning_data ADD COLUMN IF NOT EXISTS user_id TEXT;
       ALTER TABLE custom_categories ADD COLUMN IF NOT EXISTS user_id TEXT;
       ALTER TABLE custom_categories ADD COLUMN IF NOT EXISTS emoji VARCHAR(20) DEFAULT '📌';
@@ -168,7 +193,7 @@ async function initDB() {
 let unclaimedDataClaimed = false;
 app.use('/api', async (req, res, next) => {
   if (unclaimedDataClaimed) return next();
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   try {
     const result = await pool.query('SELECT COUNT(*) FROM items WHERE user_id IS NULL');
     const unclaimedCount = parseInt(result.rows[0].count);
@@ -191,21 +216,27 @@ app.use('/api', async (req, res, next) => {
 
 // GET all items
 app.get('/api/items', async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   try {
-    const result = await pool.query('SELECT * FROM items WHERE user_id = $1 ORDER BY sort_order ASC, created_at DESC', [userId]);
-    const items = result.rows.map(row => ({
-      id: Number(row.id),
-      text: row.text,
-      completed: row.completed,
-      createdAt: row.created_at.toISOString(),
-      type: row.type,
-      category: row.category,
-      priority: row.priority,
-      dueDate: row.due_date ? row.due_date.toISOString().split('T')[0] : null,
-      notes: row.notes || '',
-      order: row.sort_order
-    }));
+    const result = await withRetry(() =>
+      pool.query('SELECT * FROM items WHERE user_id = $1 ORDER BY sort_order ASC, created_at DESC', [userId])
+    );
+    const items = result.rows.map(row => {
+      const created = row.created_at ? new Date(row.created_at) : new Date();
+      const dueDate = row.due_date == null ? null : (row.due_date instanceof Date ? row.due_date.toISOString().split('T')[0] : String(row.due_date).slice(0, 10));
+      return {
+        id: Number(row.id),
+        text: row.text,
+        completed: row.completed,
+        createdAt: created.toISOString(),
+        type: row.type,
+        category: row.category,
+        priority: row.priority,
+        dueDate,
+        notes: row.notes || '',
+        order: row.sort_order ?? 0
+      };
+    });
     res.json(items);
   } catch (err) {
     console.error('Error fetching items:', err);
@@ -215,7 +246,7 @@ app.get('/api/items', async (req, res) => {
 
 // POST new item(s)
 app.post('/api/items', validate(z.union([itemSchema, z.array(itemSchema)])), async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const items = Array.isArray(req.body) ? req.body : [req.body];
   const client = await pool.connect();
   try {
@@ -255,7 +286,7 @@ app.post('/api/items', validate(z.union([itemSchema, z.array(itemSchema)])), asy
 
 // PUT update item
 app.put('/api/items/:id', validate(itemUpdateSchema), async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const { id } = req.params;
   const { text, completed, type, category, priority, dueDate, notes, order } = req.body;
 
@@ -283,7 +314,7 @@ app.put('/api/items/:id', validate(itemUpdateSchema), async (req, res) => {
 
 // PUT bulk update items (for reordering)
 app.put('/api/items', validate(z.array(itemSchema).min(1).max(1000)), async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const items = req.body;
   const client = await pool.connect();
   try {
@@ -308,7 +339,7 @@ app.put('/api/items', validate(z.array(itemSchema).min(1).max(1000)), async (req
 
 // DELETE item
 app.delete('/api/items/:id', async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const { id } = req.params;
 
   // Validate ID is a valid number
@@ -333,7 +364,7 @@ app.delete('/api/items/:id', async (req, res) => {
 
 // GET all learning data
 app.get('/api/learning-data', async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   try {
     const result = await pool.query('SELECT * FROM learning_data WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
     const data = result.rows.map(row => ({
@@ -352,7 +383,7 @@ app.get('/api/learning-data', async (req, res) => {
 
 // POST learning data entry
 app.post('/api/learning-data', validate(learningDataSchema), async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const { text, type, category, priority } = req.body;
   try {
     const result = await pool.query(
@@ -370,7 +401,7 @@ app.post('/api/learning-data', validate(learningDataSchema), async (req, res) =>
 
 // GET all custom categories (returns { name, emoji }[])
 app.get('/api/custom-categories', async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   try {
     const result = await pool.query('SELECT name, emoji FROM custom_categories WHERE user_id = $1 ORDER BY id', [userId]);
     res.json(result.rows.map(r => ({ name: r.name, emoji: r.emoji || '📌' })));
@@ -382,7 +413,7 @@ app.get('/api/custom-categories', async (req, res) => {
 
 // POST new custom category
 app.post('/api/custom-categories', validate(customCategorySchema), async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const { name, emoji } = req.body;
   const emojiVal = (emoji && String(emoji).trim()) ? String(emoji).trim().slice(0, 10) : '📌';
   try {
@@ -403,7 +434,7 @@ app.post('/api/custom-categories', validate(customCategorySchema), async (req, r
 
 // PUT update custom category (name and/or emoji); :name is the current name
 app.put('/api/custom-categories/:name', validate(customCategoryUpdateSchema), async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const oldName = decodeURIComponent(req.params.name);
 
   // Validate oldName
@@ -465,7 +496,7 @@ app.put('/api/custom-categories/:name', validate(customCategoryUpdateSchema), as
 
 // DELETE custom category
 app.delete('/api/custom-categories/:name', async (req, res) => {
-  const userId = req.auth.userId;
+  const userId = req.auth().userId;
   const { name } = req.params;
   const categoryName = decodeURIComponent(name);
 
@@ -524,9 +555,10 @@ app.post('/api/categorize', validate(categorizeRequestSchema), async (req, res) 
   }
 });
 
-// Serve index.html for root
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// SPA fallback: serve index.html for non-API routes (client-side routing)
+// Express 5 / path-to-regexp no longer accepts '*'; use a named splat
+app.get('/{*path}', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 // Start server
