@@ -11,6 +11,7 @@ export const VoiceTextInput = React.memo(function VoiceTextInput() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const recognitionRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -33,6 +34,10 @@ export const VoiceTextInput = React.memo(function VoiceTextInput() {
       };
       recognitionRef.current.onend = () => setIsListening(false);
     }
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, []);
 
   const toggleListening = async () => {
@@ -63,6 +68,10 @@ export const VoiceTextInput = React.memo(function VoiceTextInput() {
   };
 
   const categorizeWithClaude = async (text) => {
+    // Abort any in-flight request
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
     setLoading(true);
     try {
       const learningContext = learningData.length > 0
@@ -113,6 +122,7 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(body),
+        signal: abortControllerRef.current.signal
       });
       if (!response.ok) {
         if (response.status === 503) return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
@@ -128,6 +138,9 @@ Return format: [{"text": "...", "type": "...", "category": "...", "priority": ".
         .map((item, idx) => applyWeekdayDueDateFromInput(item, text, idx, weekdaysInInput))
         .map(applyDefaultDueDate);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }];
+      }
       console.error('Categorization error:', err);
       return [{ text, type: 'task', category: 'personal', priority: 'medium', dueDate: null }]
         .map((item, idx) => applyWeekdayDueDateFromInput(item, text, idx, getWeekdaysFromInput(text)))

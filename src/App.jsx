@@ -33,40 +33,46 @@ function VoiceTaskManager() {
   const [statsPeriod, setStatsPeriod] = useState('all');
   const [loadError, setLoadError] = useState(null);
   const suppressGroupToggleRef = useRef(false);
+  const abortControllerRef = useRef(null);
 
-  useEffect(() => {
-    loadItems();
-    loadLearningData();
-    loadCustomCategories();
-  }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async () => {
     setLoadError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/items`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/items`, {
+        credentials: 'include',
+        signal: abortControllerRef.current?.signal
+      });
       if (res.ok) {
         setItems(await res.json());
       } else {
         setLoadError(res.status === 401 ? 'Please sign in again.' : `Could not load tasks (${res.status}).`);
       }
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.log('Failed to load items:', err);
       setLoadError('Could not load tasks. Is the server running? (npm run dev:server)');
     }
-  };
+  }, []);
 
-  const loadLearningData = async () => {
+  const loadLearningData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/learning-data`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/learning-data`, {
+        credentials: 'include',
+        signal: abortControllerRef.current?.signal
+      });
       if (res.ok) setLearningData(await res.json());
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.log('Failed to load learning data:', err);
     }
-  };
+  }, []);
 
-  const loadCustomCategories = async () => {
+  const loadCustomCategories = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/custom-categories`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/custom-categories`, {
+        credentials: 'include',
+        signal: abortControllerRef.current?.signal
+      });
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data)
@@ -75,9 +81,22 @@ function VoiceTaskManager() {
         setCustomCategories(list);
       }
     } catch (err) {
+      if (err.name === 'AbortError') return;
       console.log('Failed to load custom categories:', err);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    abortControllerRef.current = new AbortController();
+
+    loadItems();
+    loadLearningData();
+    loadCustomCategories();
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [loadItems, loadLearningData, loadCustomCategories]);
 
   const allCategories = useMemo(() =>
     [...DEFAULT_CATEGORIES, ...customCategories.map(c => c.name)],
@@ -89,46 +108,75 @@ function VoiceTaskManager() {
     const item = items.find(i => i.id === id);
     if (!item) return;
     const updated = { ...item, completed: !item.completed };
+
+    // Optimistic update
+    setItems(items.map(i => i.id === id ? updated : i));
+
     if (updated.completed) {
       fireConfetti(e.currentTarget);
       setJustCompletedId(id);
       setTimeout(() => setJustCompletedId(null), 400);
     }
+
     try {
-      await fetch(`${API_BASE}/api/items/${id}`, {
+      const res = await fetch(`${API_BASE}/api/items/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(updated)
       });
-      setItems(items.map(i => i.id === id ? updated : i));
+      if (!res.ok) throw new Error('Failed to update');
     } catch (err) {
-      setError('Failed to update item');
+      // Rollback on failure
+      setItems(items.map(i => i.id === id ? item : i));
+      setError('Failed to update item. Changes reverted.');
+      setTimeout(() => setError(''), 5000);
     }
   };
 
   const deleteItem = async (id, e) => {
     e.stopPropagation();
+    const item = items.find(i => i.id === id);
+    if (!item) return;
+
+    // Optimistic update
+    setItems(items.filter(i => i.id !== id));
+
     try {
-      await fetch(`${API_BASE}/api/items/${id}`, { method: 'DELETE', credentials: 'include' });
-      setItems(items.filter(item => item.id !== id));
+      const res = await fetch(`${API_BASE}/api/items/${id}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to delete');
     } catch (err) {
-      setError('Failed to delete item');
+      // Rollback on failure
+      setItems([...items]);
+      setError('Failed to delete item. Changes reverted.');
+      setTimeout(() => setError(''), 5000);
     }
   };
 
   const saveItemEdit = async (updatedItem, editValues) => {
+    const originalItem = items.find(i => i.id === updatedItem.id);
+    if (!originalItem) return;
+
+    // Optimistic update
+    setItems(items.map(i => i.id === updatedItem.id ? updatedItem : i));
+
     try {
-      await fetch(`${API_BASE}/api/items/${updatedItem.id}`, {
+      const res = await fetch(`${API_BASE}/api/items/${updatedItem.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(updatedItem)
       });
-      setItems(items.map(i => i.id === updatedItem.id ? updatedItem : i));
+      if (!res.ok) throw new Error('Failed to save');
     } catch (err) {
-      setError('Failed to save edit');
+      // Rollback on failure
+      setItems(items.map(i => i.id === updatedItem.id ? originalItem : i));
+      setError('Failed to save edit. Changes reverted.');
+      setTimeout(() => setError(''), 5000);
+      return;
     }
+
+    // Save learning data (non-critical, no rollback needed)
     try {
       await fetch(`${API_BASE}/api/learning-data`, {
         method: 'POST',
@@ -147,17 +195,29 @@ function VoiceTaskManager() {
     }
   };
 
-  const handleDrop = (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault();
     if (!draggedItem) return;
+
+    // Capture current state for potential rollback
+    const previousItems = [...items];
     const groupItems = items.filter(i => (i.dueDate || null) === (draggedItem.dueDate || null));
+
     if (groupItems.length > 0) {
-      fetch(`${API_BASE}/api/items`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(groupItems)
-      }).catch(err => console.log('Failed to save reorder:', err));
+      try {
+        const res = await fetch(`${API_BASE}/api/items`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(groupItems)
+        });
+        if (!res.ok) throw new Error('Failed to save reorder');
+      } catch (err) {
+        // Rollback on failure
+        setItems(previousItems);
+        setError('Failed to save reorder. Changes reverted.');
+        setTimeout(() => setError(''), 5000);
+      }
     }
   };
 
@@ -234,6 +294,7 @@ function VoiceTaskManager() {
     setTimeout(() => { suppressGroupToggleRef.current = false; }, 0);
     setDragOverGroupKey(null);
     if (!draggedItem) return;
+
     let newDueDate;
     if (groupKey === 'no-date') newDueDate = null;
     else if (groupKey === 'overdue') {
@@ -241,24 +302,33 @@ function VoiceTaskManager() {
       yesterday.setDate(yesterday.getDate() - 1);
       newDueDate = toLocalDateString(yesterday);
     } else newDueDate = groupKey;
+
     if ((draggedItem.dueDate || null) === newDueDate) {
       setDraggedItem(null);
       return;
     }
+
     const targetGroupItems = items
       .filter(i => i.id !== draggedItem.id && (i.dueDate || null) === newDueDate)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const updated = { ...draggedItem, dueDate: newDueDate, order: targetGroupItems.length };
+
+    // Optimistic update
+    setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+
     try {
-      await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
+      const res = await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(updated)
       });
-      setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+      if (!res.ok) throw new Error('Failed to update');
     } catch (err) {
-      setError('Failed to update due date');
+      // Rollback on failure
+      setItems(items.map(i => i.id === draggedItem.id ? draggedItem : i));
+      setError('Failed to update due date. Changes reverted.');
+      setTimeout(() => setError(''), 5000);
     }
     setDraggedItem(null);
   };
@@ -291,6 +361,19 @@ function VoiceTaskManager() {
               {showCategoryManager && <CategoryManager />}
 
               <VoiceTextInput />
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 flex items-center justify-between">
+                  <p className="text-red-700 text-sm">{error}</p>
+                  <button
+                    onClick={() => setError('')}
+                    className="text-red-500 hover:text-red-700 text-xl leading-none"
+                    title="Dismiss"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
 
               <FilterBar filter={filter} setFilter={setFilter} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />
 

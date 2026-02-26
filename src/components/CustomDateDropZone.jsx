@@ -33,19 +33,26 @@ export const CustomDateDropZone = React.memo(function CustomDateDropZone() {
       setDraggedItem(null);
       return;
     }
+
     const targetGroupItems = items
       .filter(i => i.id !== draggedItem.id && (i.dueDate || null) === customDropDate)
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     const updated = { ...draggedItem, dueDate: customDropDate, order: targetGroupItems.length };
+
+    // Optimistic update
+    setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+
     try {
-      await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
+      const res = await fetch(`${API_BASE}/api/items/${draggedItem.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(updated)
       });
-      setItems(items.map(i => i.id === draggedItem.id ? updated : i));
+      if (!res.ok) throw new Error('Failed to update');
     } catch (err) {
+      // Rollback on failure
+      setItems(items.map(i => i.id === draggedItem.id ? draggedItem : i));
       console.error('Failed to update due date:', err);
     }
     setDraggedItem(null);
